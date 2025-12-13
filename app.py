@@ -10,7 +10,7 @@ import altair as alt
 st.set_page_config(page_title="LMS ФМФКН", layout="wide", page_icon="🎓")
 
 # --- КОНСТАНТИ ---
-ADMIN_SECRET_KEY = ""  # Ключ вимкнено
+ADMIN_SECRET_KEY = ""
 
 SUBJECTS_LIST = [
     "Математичний аналіз", 
@@ -50,7 +50,6 @@ GROUPS_DATA = {
     "1МСОФА": ["Міщенко Владислав Сергійович", "Журжа Артем Арсенович", "Бережна Регіна Олександрівна", "Дмитренко Анастасія Олександрівна", "Дріма Віталій", "Олексійко Олександр Олександрович"]
 }
 
-# --- ДАНІ (Викладачі) ---
 TEACHERS_DATA = {
     "Кафедра алгебри і методики навчання математики": [
         "Коношевський Олег Леонідович (Завідувач кафедри)", "Матяш Ольга Іванівна", "Михайленко Любов Федорівна", "Воєвода Аліна Леонідівна (Декан факультету)",
@@ -69,62 +68,28 @@ TEACHERS_DATA = {
     ]
 }
 
-# --- BACKEND (База Даних) ---
-
+# --- BACKEND ---
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_hashes(password, hashed_text):
-    if make_hashes(password) == hashed_text:
-        return True
+    if make_hashes(password) == hashed_text: return True
     return False
 
 def create_connection():
-    conn = sqlite3.connect('university_v9.db', check_same_thread=False)
-    return conn
+    return sqlite3.connect('university_v10.db', check_same_thread=False)
 
 def init_db():
     conn = create_connection()
     c = conn.cursor()
-    
     c.execute('''CREATE TABLE IF NOT EXISTS users(username TEXT PRIMARY KEY, password TEXT, role TEXT, full_name TEXT, group_link TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT, group_name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day TEXT, time TEXT, subject TEXT, teacher TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS documents(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, student_name TEXT, status TEXT, date TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS file_storage(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT,
-                file_content BLOB,
-                upload_date TEXT,
-                uploader TEXT,
-                subject TEXT,
-                description TEXT)''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS grades(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_name TEXT,
-                group_name TEXT,
-                subject TEXT,
-                type_of_work TEXT, 
-                grade INTEGER,
-                date TEXT)''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_name TEXT,
-                group_name TEXT,
-                subject TEXT,
-                date_column TEXT, 
-                status TEXT)''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS news(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                message TEXT,
-                author TEXT,
-                date TEXT)''')
-
+    c.execute('''CREATE TABLE IF NOT EXISTS file_storage(id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, file_content BLOB, upload_date TEXT, uploader TEXT, subject TEXT, description TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS grades(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, type_of_work TEXT, grade INTEGER, date TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, date_column TEXT, status TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS news(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, message TEXT, author TEXT, date TEXT)''')
     conn.commit()
 
     c.execute('SELECT count(*) FROM students')
@@ -203,13 +168,11 @@ def login_register_page():
 def main_panel():
     st.title("🏠 Головна панель LMS")
     st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
-    
     conn = create_connection()
     c = conn.cursor()
 
     st.divider()
     st.subheader("📊 Аналітика та Статистика")
-    
     kpi1, kpi2, kpi3 = st.columns(3)
     
     if st.session_state['role'] == 'student':
@@ -225,60 +188,38 @@ def main_panel():
 
     if st.session_state['role'] == 'student':
         avg_q = f"SELECT avg(grade) FROM grades WHERE student_name='{st.session_state['full_name']}'"
-        label_avg = "Мій середній бал"
     else:
         avg_q = "SELECT avg(grade) FROM grades"
-        label_avg = "Середній бал по факультету"
-    
     avg_val = pd.read_sql_query(avg_q, conn).iloc[0,0]
     avg_val = round(avg_val, 1) if avg_val else 0
-    kpi3.metric(label_avg, avg_val)
+    kpi3.metric("Середній бал", avg_val)
 
     col_chart1, col_chart2 = st.columns(2)
-    
     with col_chart1:
         st.markdown("**📈 Успішність (Середній бал)**")
         if st.session_state['role'] == 'student':
             query_chart = f"SELECT subject, avg(grade) as avg_grade FROM grades WHERE student_name='{st.session_state['full_name']}' GROUP BY subject"
         else:
             query_chart = "SELECT subject, avg(grade) as avg_grade FROM grades GROUP BY subject"
-        
         df_chart = pd.read_sql_query(query_chart, conn)
-        if not df_chart.empty:
-            st.bar_chart(df_chart.set_index('subject'))
-        else:
-            st.info("Недостатньо даних.")
+        if not df_chart.empty: st.bar_chart(df_chart.set_index('subject'))
+        else: st.info("Недостатньо даних.")
 
     with col_chart2:
         st.markdown("**📉 Відвідуваність**")
-        if st.session_state['role'] == 'student':
-            q_att = f"SELECT status FROM attendance WHERE student_name='{st.session_state['full_name']}'"
-        else:
-            q_att = "SELECT status FROM attendance"
-            
+        q_att = f"SELECT status FROM attendance WHERE student_name='{st.session_state['full_name']}'" if st.session_state['role'] == 'student' else "SELECT status FROM attendance"
         df_att = pd.read_sql_query(q_att, conn)
         if not df_att.empty:
             absent_count = df_att[df_att['status'] != ''].shape[0] 
             present_count = df_att[df_att['status'] == ''].shape[0] 
-            
-            att_data = pd.DataFrame({
-                'Статус': ['Присутній', 'Відсутній/Інше'],
-                'Кількість': [present_count, absent_count]
-            })
-            
+            att_data = pd.DataFrame({'Статус': ['Присутній', 'Відсутній/Інше'], 'Кількість': [present_count, absent_count]})
             base = alt.Chart(att_data).encode(theta=alt.Theta("Кількість", stack=True))
-            pie = base.mark_arc(outerRadius=120).encode(
-                color=alt.Color("Статус"),
-                order=alt.Order("Кількість", sort="descending"),
-                tooltip=["Статус", "Кількість"]
-            )
+            pie = base.mark_arc(outerRadius=120).encode(color=alt.Color("Статус"), order=alt.Order("Кількість", sort="descending"), tooltip=["Статус", "Кількість"])
             st.altair_chart(pie, use_container_width=True)
-        else:
-            st.info("Дані відсутні.")
+        else: st.info("Дані відсутні.")
 
     st.divider()
     st.subheader("📢 Оголошення та Новини")
-
     if st.session_state['role'] in ['admin', 'teacher']:
         with st.expander("📝 Додати нове оголошення"):
             with st.form("news_form"):
@@ -287,45 +228,35 @@ def main_panel():
                 if st.form_submit_button("Опублікувати"):
                     if n_title and n_msg:
                         date_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        c.execute("INSERT INTO news (title, message, author, date) VALUES (?,?,?,?)",
-                                  (n_title, n_msg, st.session_state['full_name'], date_pub))
+                        c.execute("INSERT INTO news (title, message, author, date) VALUES (?,?,?,?)", (n_title, n_msg, st.session_state['full_name'], date_pub))
                         conn.commit()
                         st.success("Новину опубліковано!")
                         st.rerun()
-                    else:
-                        st.warning("Заповніть заголовок і текст.")
-
     news_df = pd.read_sql_query("SELECT title, message, author, date FROM news ORDER BY id DESC", conn)
-    
     if not news_df.empty:
-        for index, row in news_df.iterrows():
+        for i, row in news_df.iterrows():
             with st.container(border=True):
                 st.markdown(f"### {row['title']}")
                 st.write(row['message'])
                 st.caption(f"🗓️ {row['date']} | ✍️ {row['author']}")
-    else:
-        st.info("Наразі немає актуальних оголошень.")
+    else: st.info("Наразі немає актуальних оголошень.")
 
 def students_groups_view():
     st.title("👥 Студенти та Групи")
     conn = create_connection()
     all_groups = ["Всі"] + list(GROUPS_DATA.keys())
     selected_group = st.selectbox("Фільтр по групі:", all_groups)
-    
     query = "SELECT id, full_name as 'ПІБ', group_name as 'Група' FROM students"
-    if selected_group != "Всі":
-        query += f" WHERE group_name='{selected_group}'"
-    
+    if selected_group != "Всі": query += f" WHERE group_name='{selected_group}'"
     df = pd.read_sql_query(query, conn)
     csv = convert_df_to_csv(df)
     st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
     st.dataframe(df, use_container_width=True)
-    
     if st.session_state['role'] in ['admin', 'teacher']:
         st.divider()
         st.subheader("🛠️ Управління")
-        tab1, tab2, tab3 = st.tabs(["➕ Додати", "📥 Імпорт", "🗑️ Видалити"])
-        with tab1:
+        t1, t2, t3 = st.tabs(["➕ Додати", "📥 Імпорт", "🗑️ Видалити"])
+        with t1:
             with st.form("add_s"):
                 nm = st.text_input("ПІБ")
                 gr = st.selectbox("Група", list(GROUPS_DATA.keys()))
@@ -335,7 +266,7 @@ def students_groups_view():
                     conn.commit()
                     st.success("Додано!")
                     st.rerun()
-        with tab2:
+        with t2:
             if st.session_state['role'] == 'admin':
                 f = st.file_uploader("CSV (full_name, group_name)", type="csv")
                 if f:
@@ -345,7 +276,7 @@ def students_groups_view():
                         st.success("Імпортовано!")
                         st.rerun()
                     except Exception as e: st.error(f"Помилка: {e}")
-        with tab3:
+        with t3:
             if st.session_state['role'] == 'admin':
                 ids = pd.read_sql("SELECT id, full_name FROM students", conn)
                 s_del = st.selectbox("Студент", ids.apply(lambda x: f"{x['id']}: {x['full_name']}", axis=1))
@@ -359,7 +290,7 @@ def students_groups_view():
 def teachers_view():
     st.title("👨‍🏫 Викладачі")
     for dept, teachers in TEACHERS_DATA.items():
-        with st.expander(f"📚 {dept}", expanded=False):
+        with st.expander(f"📚 {dept}"):
             for t in teachers: st.write(f"- {t}")
 
 def schedule_view():
@@ -368,11 +299,9 @@ def schedule_view():
     grp = st.selectbox("Група", list(GROUPS_DATA.keys()))
     df = pd.read_sql_query(f"SELECT day, time, subject, teacher FROM schedule WHERE group_name='{grp}'", conn)
     if not df.empty: 
-        csv_sched = convert_df_to_csv(df)
-        st.download_button("⬇️ Завантажити розклад", csv_sched, f"schedule_{grp}.csv", "text/csv")
+        st.download_button("⬇️ Завантажити", convert_df_to_csv(df), f"schedule_{grp}.csv", "text/csv")
         st.table(df)
     else: st.info("Пусто")
-    
     if st.session_state['role'] in ['admin', 'teacher']:
         st.divider()
         with st.form("sch"):
@@ -393,8 +322,7 @@ def documents_view():
     if c == "Створити":
         t = st.selectbox("Тип", ["Довідка", "Заява"])
         if st.button("Надіслати"):
-            conn.execute("INSERT INTO documents (title, student_name, status, date) VALUES (?,?,?,?)", 
-                         (t, st.session_state['full_name'], "Очікує", str(datetime.now().date())))
+            conn.execute("INSERT INTO documents (title, student_name, status, date) VALUES (?,?,?,?)", (t, st.session_state['full_name'], "Очікує", str(datetime.now().date())))
             conn.commit()
             st.success("Надіслано")
     else:
@@ -405,29 +333,24 @@ def file_repository_view():
     st.title("🗄️ Файловий Репозиторій")
     conn = create_connection()
     c = conn.cursor()
-
     col_f1, col_f2 = st.columns([2,1])
-    with col_f1:
-        filter_subj = st.selectbox("📂 Фільтр по предмету", ["Всі"] + SUBJECTS_LIST)
-    
+    with col_f1: filter_subj = st.selectbox("📂 Фільтр по предмету", ["Всі"] + SUBJECTS_LIST)
     if st.session_state['role'] in ['admin', 'teacher']:
-        with st.expander("📤 Завантажити новий матеріал", expanded=False):
+        with st.expander("📤 Завантажити"):
             with st.form("upload_form"):
-                uploaded_file = st.file_uploader("Оберіть файл", accept_multiple_files=False)
+                uploaded_file = st.file_uploader("Файл", accept_multiple_files=False)
                 f_subject = st.selectbox("Предмет", SUBJECTS_LIST)
-                f_desc = st.text_input("Опис / Тема")
-                if st.form_submit_button("Зберегти файл"):
+                f_desc = st.text_input("Опис")
+                if st.form_submit_button("Зберегти"):
                     if uploaded_file and f_desc:
                         c.execute("INSERT INTO file_storage (filename, file_content, upload_date, uploader, subject, description) VALUES (?,?,?,?,?,?)",
                                   (uploaded_file.name, uploaded_file.read(), datetime.now().strftime("%Y-%m-%d %H:%M"), st.session_state['full_name'], f_subject, f_desc))
                         conn.commit()
                         st.success("Збережено!")
                         st.rerun()
-
     query = "SELECT id, filename, subject, description, upload_date, uploader FROM file_storage"
     if filter_subj != "Всі": query += f" WHERE subject='{filter_subj}'"
     df_files = pd.read_sql_query(query, conn)
-    
     if not df_files.empty:
         for s in df_files['subject'].unique():
             st.subheader(f"📘 {s}")
@@ -450,30 +373,25 @@ def gradebook_view():
     st.title("💯 Журнал Оцінок")
     conn = create_connection()
     c = conn.cursor()
-    
     if st.session_state['role'] == 'student':
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
     else:
-        tab_journal, tab_ops = st.tabs(["Журнал", "📥/📤 Операції з даними"])
-        
+        t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
         subj = c2.selectbox("Предмет", SUBJECTS_LIST)
-
-        with tab_journal:
+        with t_journal:
             with st.expander("➕ Додати колонку"):
                 with st.form("new_col"):
-                    nm = st.text_input("Назва (напр. Лаб 1)")
+                    nm = st.text_input("Назва")
                     dt = st.date_input("Дата")
                     if st.form_submit_button("Створити"):
                         stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
                         for s in stds:
-                            c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)",
-                                         (s, grp, subj, nm, 0, str(dt)))
+                            c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)", (s, grp, subj, nm, 0, str(dt)))
                         conn.commit()
                         st.rerun()
-            
             raw = pd.read_sql(f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
             if not raw.empty:
                 matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
@@ -485,79 +403,113 @@ def gradebook_view():
                             if exists: c.execute("UPDATE grades SET grade=? WHERE id=?", (val, exists[0]))
                     conn.commit()
                     st.success("Збережено!")
-            else: st.info("Додайте першу колонку.")
-
-        with tab_ops:
-            st.subheader("Експорт та Імпорт")
-            col_exp1, col_exp2 = st.columns(2)
-            
-            # Експорт "Електронної відомості" (Raw Data)
+            else: st.info("Додайте колонку.")
+        with t_ops:
             raw_export = pd.read_sql(f"SELECT * FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
-            csv_raw = convert_df_to_csv(raw_export)
-            col_exp1.download_button("⬇️ Експортувати Електронну відомість (CSV)", csv_raw, "grades_raw.csv", "text/csv")
+            st.download_button("⬇️ Експорт (Raw)", convert_df_to_csv(raw_export), "grades_raw.csv", "text/csv")
+            if not raw.empty: st.download_button("⬇️ Експорт (Matrix)", convert_df_to_csv(matrix), "grades_matrix.csv", "text/csv")
             
-            # Експорт "Зведеної відомості" (Matrix)
-            if not raw.empty:
-                csv_matrix = convert_df_to_csv(matrix)
-                col_exp2.download_button("⬇️ Експортувати Зведену відомість (Matrix CSV)", csv_matrix, "grades_matrix.csv", "text/csv")
-            
-            st.divider()
-            
-            # Імпорт оцінок
-            st.write("**Імпорт оцінок (CSV)**")
-            st.caption("Формат: `student_name`, `group_name`, `subject`, `type_of_work`, `grade`, `date`")
-            up_grades = st.file_uploader("Завантажити CSV з оцінками", type="csv")
-            if up_grades:
-                if st.button("Імпортувати дані"):
-                    try:
-                        df_new_grades = pd.read_csv(up_grades)
-                        # Перевірка колонок
-                        req_cols = {'student_name', 'group_name', 'subject', 'type_of_work', 'grade', 'date'}
-                        if req_cols.issubset(df_new_grades.columns):
-                            df_new_grades[list(req_cols)].to_sql('grades', conn, if_exists='append', index=False)
-                            st.success(f"Імпортовано {len(df_new_grades)} оцінок!")
-                        else:
-                            st.error(f"Файл має містити колонки: {req_cols}")
-                    except Exception as e:
-                        st.error(f"Помилка: {e}")
+            up_grades = st.file_uploader("Імпорт оцінок (CSV)", type="csv")
+            if up_grades and st.button("Імпортувати"):
+                try:
+                    df_new = pd.read_csv(up_grades)
+                    df_new.to_sql('grades', conn, if_exists='append', index=False)
+                    st.success("Імпортовано!")
+                except Exception as e: st.error(f"Помилка: {e}")
 
 def attendance_view():
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
     if st.session_state['role'] == 'student':
-        st.info("Ваша історія")
         df_att = pd.read_sql(f"SELECT subject, date_column as 'Дата', status FROM attendance WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df_att, use_container_width=True)
     else:
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="att_grp")
         subj = c2.selectbox("Предмет", SUBJECTS_LIST, key="att_sbj")
-        
         with st.expander("➕ Додати дату"):
             with st.form("new_att_col"):
-                col_name = st.text_input("Назва (напр. '13.12')")
+                col_name = st.text_input("Назва")
                 if st.form_submit_button("Створити"):
                     stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
                     for s in stds:
-                        conn.execute("INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)",
-                                     (s, grp, subj, col_name, "")) 
+                        conn.execute("INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)", (s, grp, subj, col_name, "")) 
                     conn.commit()
                     st.rerun()
-        
         raw = pd.read_sql(f"SELECT student_name, date_column, status FROM attendance WHERE group_name='{grp}' AND subject='{subj}'", conn)
         if not raw.empty:
             matrix = raw.pivot_table(index='student_name', columns='date_column', values='status', aggfunc='first').fillna("")
             st.write("Ставте 'н' для відсутніх:")
             edited = st.data_editor(matrix, use_container_width=True)
-            if st.button("💾 Зберегти відвідуваність"):
+            if st.button("💾 Зберегти"):
                 for s_name, row in edited.iterrows():
                     for d_col, val in row.items():
-                        exists = conn.execute("SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
-                                            (s_name, subj, d_col)).fetchone()
-                        if exists:
-                            conn.execute("UPDATE attendance SET status=? WHERE id=?", (val, exists[0]))
+                        exists = conn.execute("SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", (s_name, subj, d_col)).fetchone()
+                        if exists: conn.execute("UPDATE attendance SET status=? WHERE id=?", (val, exists[0]))
                 conn.commit()
                 st.success("Збережено!")
+        else: st.info("Пусто.")
+
+# --- НОВА СТОРІНКА ЗВІТІВ ---
+def reports_view():
+    st.title("📊 Звіти та Пошук")
+    conn = create_connection()
+    t1, t2, t3 = st.tabs(["📋 Відомість (Група/Предмет)", "🎓 Картка Студента", "📈 Зведена відомість"])
+    
+    with t1:
+        st.subheader("Формування відомості")
+        c1, c2 = st.columns(2)
+        grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="rep_grp")
+        subj = c2.selectbox("Предмет", SUBJECTS_LIST, key="rep_subj")
+        
+        raw = pd.read_sql(f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
+        if not raw.empty:
+            matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
+            st.dataframe(matrix, use_container_width=True)
+            st.download_button("⬇️ Завантажити відомість", convert_df_to_csv(matrix), f"vidomist_{grp}_{subj}.csv", "text/csv")
+        else: st.warning("Дані відсутні.")
+
+    with t2:
+        st.subheader("Пошук студента")
+        all_students = pd.read_sql("SELECT full_name FROM students", conn)
+        if not all_students.empty:
+            selected_student = st.selectbox("Оберіть студента", all_students['full_name'].tolist())
+            
+            # Інформація
+            info = pd.read_sql(f"SELECT * FROM students WHERE full_name='{selected_student}'", conn)
+            st.write("**Інформація:**")
+            st.dataframe(info, use_container_width=True)
+            
+            # Оцінки
+            grades = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{selected_student}'", conn)
+            st.write("**Оцінки:**")
+            if not grades.empty:
+                st.dataframe(grades, use_container_width=True)
+                st.metric("Середній бал", f"{grades['grade'].mean():.2f}")
+                st.download_button("⬇️ Скачати виписку оцінок", convert_df_to_csv(grades), f"grades_{selected_student}.csv", "text/csv")
+            else: st.info("Оцінок немає.")
+        else: st.error("База студентів порожня.")
+
+    with t3:
+        st.subheader("Зведена відомість успішності (Середні бали)")
+        grp_sum = st.selectbox("Група", list(GROUPS_DATA.keys()), key="rep_sum_grp")
+        
+        # Рахуємо середній бал по кожному предмету для кожного студента
+        query = f"""
+            SELECT student_name, subject, AVG(grade) as avg_grade 
+            FROM grades 
+            WHERE group_name='{grp_sum}' 
+            GROUP BY student_name, subject
+        """
+        data = pd.read_sql(query, conn)
+        
+        if not data.empty:
+            # Pivot: Rows=Student, Cols=Subject, Val=AvgGrade
+            summary_matrix = data.pivot_table(index='student_name', columns='subject', values='avg_grade').fillna(0).round(1)
+            st.dataframe(summary_matrix, use_container_width=True)
+            st.download_button("⬇️ Завантажити зведену відомість", convert_df_to_csv(summary_matrix), f"summary_{grp_sum}.csv", "text/csv")
+        else:
+            st.warning("Дані відсутні.")
 
 def main():
     init_db()
@@ -579,6 +531,7 @@ def main():
             "Розклад занять": schedule_view,
             "Електронний журнал": gradebook_view,
             "Журнал відвідуваності": attendance_view,
+            "Звіти та Пошук": reports_view, # <-- Нова сторінка
             "Документообіг": documents_view,
             "Файловий репозиторій": file_repository_view
         }
