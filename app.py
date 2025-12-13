@@ -11,7 +11,18 @@ st.set_page_config(page_title="LMS ФМФКН", layout="wide", page_icon="🎓")
 # --- КОНСТАНТИ ---
 ADMIN_SECRET_KEY = ""  # Ключ вимкнено для зручності
 
-# --- ДАНІ (Студенти) ---
+# Єдиний список предметів для всієї системи
+SUBJECTS_LIST = [
+    "Математичний аналіз", 
+    "Програмування", 
+    "Аналітична геометрія", 
+    "Дискретна математика", 
+    "Фізика", 
+    "Англійська мова", 
+    "Філософія"
+]
+
+# --- ДАНІ (Студенти - для початкового наповнення) ---
 GROUPS_DATA = {
     "1СОМ": ["Алексєєнко Анна Олександрівна", "Гайдай Анатолій Олегович", "Журбелюк Павліна Павлівна", "Зарудняк Анастасія Сергіївна", "Книш Денис Олексійович", "Крапля Лілія Анатоліївна", "Логашкін Денис Владиславович", "Мазур Вероніка Сергіївна", "Мельник Богдан Олексійович", "Первий Андрій Миколайович", "Сулима Дарина Віталіївна", "Тимошенко Марія Миколаївна", "Шапельська Катерина Дмитрівна", "Шевчук Марія Олександрівна"],
     "1СОІ": ["Лисенко Тимофій Сергійович", "Лівий Павло Владиславович", "Муренко Степан Андрійович", "Поспелов Назар Андрійович", "Рибчук Андрій Олегович", "Томашевський Артем Васильович"],
@@ -39,7 +50,6 @@ GROUPS_DATA = {
     "1МСОФА": ["Міщенко Владислав Сергійович", "Журжа Артем Арсенович", "Бережна Регіна Олександрівна", "Дмитренко Анастасія Олександрівна", "Дріма Віталій", "Олексійко Олександр Олександрович"]
 }
 
-# --- ДАНІ (Викладачі) ---
 TEACHERS_DATA = {
     "Кафедра алгебри і методики навчання математики": [
         "Коношевський Олег Леонідович (Завідувач кафедри)", "Матяш Ольга Іванівна", "Михайленко Любов Федорівна", "Воєвода Аліна Леонідівна (Декан факультету)",
@@ -64,7 +74,8 @@ def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def create_connection():
-    return sqlite3.connect('university_v6.db', check_same_thread=False)
+    conn = sqlite3.connect('university_v7.db', check_same_thread=False)
+    return conn
 
 def init_db():
     conn = create_connection()
@@ -76,13 +87,15 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day TEXT, time TEXT, subject TEXT, teacher TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS documents(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, student_name TEXT, status TEXT, date TEXT)''')
     
-    # Файловий репозиторій
+    # --- ОНОВЛЕНО: Таблиця файлів з предметом та описом ---
     c.execute('''CREATE TABLE IF NOT EXISTS file_storage(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT,
                 file_content BLOB,
                 upload_date TEXT,
-                uploader TEXT)''')
+                uploader TEXT,
+                subject TEXT,
+                description TEXT)''')
 
     # Журнал оцінок
     c.execute('''CREATE TABLE IF NOT EXISTS grades(
@@ -94,7 +107,7 @@ def init_db():
                 grade INTEGER,
                 date TEXT)''')
 
-    # --- НОВА ТАБЛИЦЯ: Журнал відвідуваності ---
+    # Журнал відвідуваності
     c.execute('''CREATE TABLE IF NOT EXISTS attendance(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_name TEXT,
@@ -102,6 +115,15 @@ def init_db():
                 subject TEXT,
                 date_column TEXT, 
                 status TEXT)''')
+
+    # --- МІГРАЦІЯ БАЗИ ДАНИХ (Для сумісності зі старими версіями) ---
+    try:
+        c.execute("ALTER TABLE file_storage ADD COLUMN subject TEXT")
+    except: pass # Колонка вже існує
+    
+    try:
+        c.execute("ALTER TABLE file_storage ADD COLUMN description TEXT")
+    except: pass # Колонка вже існує
 
     conn.commit()
 
@@ -291,25 +313,87 @@ def documents_view():
         q = f"SELECT * FROM documents WHERE student_name='{st.session_state['full_name']}'" if st.session_state['role'] == 'student' else "SELECT * FROM documents"
         st.dataframe(pd.read_sql(q, conn), use_container_width=True)
 
+# --- ОНОВЛЕНА СТОРІНКА ФАЙЛІВ (З ПРЕДМЕТАМИ) ---
 def file_repository_view():
-    st.title("🗄️ Файли")
+    st.title("🗄️ Файловий Репозиторій (Домашні завдання)")
     conn = create_connection()
-    if st.session_state['role'] in ['admin', 'teacher']:
-        up = st.file_uploader("Завантажити файл")
-        if up and st.button("Зберегти"):
-            conn.execute("INSERT INTO file_storage (filename, file_content, upload_date, uploader) VALUES (?,?,?,?)",
-                         (up.name, up.read(), str(datetime.now().date()), st.session_state['full_name']))
-            conn.commit()
-            st.success("Збережено")
-            st.rerun()
+    c = conn.cursor()
+
+    # --- ФІЛЬТРАЦІЯ ФАЙЛІВ ---
+    col_f1, col_f2 = st.columns([2,1])
+    with col_f1:
+        # Фільтр по предмету
+        filter_subj = st.selectbox("📂 Фільтр по предмету", ["Всі"] + SUBJECTS_LIST)
     
-    files = pd.read_sql("SELECT id, filename, upload_date FROM file_storage", conn)
-    for i, r in files.iterrows():
-        c1, c2, c3 = st.columns([4,2,1])
-        c1.write(r['filename'])
-        c2.caption(r['upload_date'])
-        data = conn.execute("SELECT file_content FROM file_storage WHERE id=?", (r['id'],)).fetchone()[0]
-        c3.download_button("⬇️", data, r['filename'], key=f"d{r['id']}")
+    # --- ЗАВАНТАЖЕННЯ (Адмін/Викладач) ---
+    if st.session_state['role'] in ['admin', 'teacher']:
+        with st.expander("📤 Завантажити новий матеріал", expanded=False):
+            with st.form("upload_form"):
+                uploaded_file = st.file_uploader("Оберіть файл (PDF, DOCX, JPG...)", accept_multiple_files=False)
+                
+                # Прив'язка до предмету
+                f_subject = st.selectbox("Предмет", SUBJECTS_LIST)
+                f_desc = st.text_input("Опис / Тема (напр. Лекція 1 або ДЗ 3)")
+                
+                if st.form_submit_button("Зберегти файл"):
+                    if uploaded_file is not None and f_desc:
+                        try:
+                            file_bytes = uploaded_file.read()
+                            upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            
+                            c.execute("INSERT INTO file_storage (filename, file_content, upload_date, uploader, subject, description) VALUES (?,?,?,?,?,?)",
+                                      (uploaded_file.name, file_bytes, upload_date, st.session_state['full_name'], f_subject, f_desc))
+                            conn.commit()
+                            st.success(f"Файл '{uploaded_file.name}' успішно додано до '{f_subject}'!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Помилка: {e}")
+                    else:
+                        st.warning("Будь ласка, завантажте файл і введіть опис.")
+
+    st.divider()
+    
+    # --- ВІДОБРАЖЕННЯ СПИСКУ ---
+    query = "SELECT id, filename, subject, description, upload_date, uploader FROM file_storage"
+    if filter_subj != "Всі":
+        query += f" WHERE subject='{filter_subj}'"
+    
+    df_files = pd.read_sql_query(query, conn)
+    
+    if not df_files.empty:
+        # Групування по предметах для красивого вигляду
+        subjects_in_view = df_files['subject'].unique()
+        
+        for subj in subjects_in_view:
+            st.subheader(f"📘 {subj}")
+            subset = df_files[df_files['subject'] == subj]
+            
+            for index, row in subset.iterrows():
+                # Картка файлу
+                with st.container(border=True):
+                    col1, col2, col3, col4 = st.columns([3, 4, 2, 1])
+                    with col1:
+                        st.write(f"📄 **{row['filename']}**")
+                    with col2:
+                        st.write(f"📝 {row['description']}")
+                        st.caption(f"Автор: {row['uploader']} | Дата: {row['upload_date']}")
+                    with col3:
+                        file_data = c.execute("SELECT file_content FROM file_storage WHERE id=?", (row['id'],)).fetchone()[0]
+                        st.download_button(
+                            label="⬇️ Завантажити",
+                            data=file_data,
+                            file_name=row['filename'],
+                            mime="application/octet-stream",
+                            key=f"dl_{row['id']}"
+                        )
+                    with col4:
+                        if st.session_state['role'] == 'admin':
+                            if st.button("🗑️", key=f"del_{row['id']}", help="Видалити"):
+                                c.execute("DELETE FROM file_storage WHERE id=?", (row['id'],))
+                                conn.commit()
+                                st.rerun()
+    else:
+        st.info("Файлів не знайдено.")
 
 def gradebook_view():
     st.title("💯 Журнал Оцінок")
@@ -321,7 +405,7 @@ def gradebook_view():
     else:
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
-        subj = c2.selectbox("Предмет", ["Матаналіз", "Програмування", "Фізика"])
+        subj = c2.selectbox("Предмет", SUBJECTS_LIST)
         
         with st.expander("➕ Додати колонку"):
             with st.form("new_col"):
@@ -347,13 +431,11 @@ def gradebook_view():
                 conn.commit()
                 st.success("Збережено!")
 
-# --- НОВА ФУНКЦІЯ: ЖУРНАЛ ВІДВІДУВАНОСТІ ---
 def attendance_view():
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
     
     if st.session_state['role'] == 'student':
-        # Студент бачить тільки свої н-ки
         st.info("Ваша історія відвідуваності")
         df_att = pd.read_sql(f"SELECT subject, date_column as 'Дата/Пара', status FROM attendance WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df_att, use_container_width=True)
@@ -361,9 +443,8 @@ def attendance_view():
         st.subheader("Облік пропусків")
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="att_grp")
-        subj = c2.selectbox("Предмет", ["Матаналіз", "Програмування", "Фізика"], key="att_sbj")
+        subj = c2.selectbox("Предмет", SUBJECTS_LIST, key="att_sbj")
         
-        # Додавання колонки (наприклад "13.12")
         with st.expander("➕ Додати дату/пару"):
             with st.form("new_att_col"):
                 col_name = st.text_input("Назва (напр. '13.12 (1 пара)')")
@@ -371,25 +452,20 @@ def attendance_view():
                     if col_name:
                         stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
                         for s in stds:
-                            # Створюємо пусті записи (щоб були в матриці)
                             conn.execute("INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)",
-                                         (s, grp, subj, col_name, "")) # Пусто = присутній
+                                         (s, grp, subj, col_name, "")) 
                         conn.commit()
                         st.rerun()
         
-        # Відображення матриці
         raw = pd.read_sql(f"SELECT student_name, date_column, status FROM attendance WHERE group_name='{grp}' AND subject='{subj}'", conn)
         if not raw.empty:
-            # Pivot table для тексту (aggfunc='first' бере рядок)
             matrix = raw.pivot_table(index='student_name', columns='date_column', values='status', aggfunc='first').fillna("")
-            
             st.write("Ставте 'н' для відсутніх:")
             edited = st.data_editor(matrix, use_container_width=True)
             
             if st.button("💾 Зберегти відвідуваність"):
                 for s_name, row in edited.iterrows():
                     for d_col, val in row.items():
-                        # Оновлюємо статус
                         exists = conn.execute("SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
                                             (s_name, subj, d_col)).fetchone()
                         if exists:
@@ -421,7 +497,7 @@ def main():
             "Викладачі та Кафедри": teachers_view,
             "Розклад занять": schedule_view,
             "Електронний журнал": gradebook_view,
-            "Журнал відвідуваності": attendance_view, # <-- Додано
+            "Журнал відвідуваності": attendance_view,
             "Документообіг": documents_view,
             "Файловий репозиторій": file_repository_view
         }
