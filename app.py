@@ -9,6 +9,62 @@ import altair as alt
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="LMS ФМФКН", layout="wide", page_icon="🎓")
 
+# --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ (Dark/Light Mode) ---
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'
+
+def toggle_theme():
+    if st.session_state.theme == 'light':
+        st.session_state.theme = 'dark'
+    else:
+        st.session_state.theme = 'light'
+
+# Застосування стилів (CSS Injection)
+if st.session_state.theme == 'dark':
+    st.markdown("""
+    <style>
+        /* Глобальний фон */
+        .stApp {
+            background-color: #0E1117;
+            color: #FAFAFA;
+        }
+        /* Бічна панель */
+        [data-testid="stSidebar"] {
+            background-color: #262730;
+        }
+        /* Заголовки */
+        h1, h2, h3, h4, h5, h6, .stMarkdown {
+            color: #FAFAFA !important;
+        }
+        /* Поля вводу (Input, Select) */
+        .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div {
+            background-color: #262730 !important;
+            color: #FAFAFA !important;
+            border-color: #4B4B4B !important;
+        }
+        /* Таблиці */
+        [data-testid="stDataFrame"], [data-testid="stTable"] {
+            background-color: #262730;
+            color: white;
+        }
+        /* Експандери */
+        .streamlit-expanderHeader {
+            background-color: #262730 !important;
+            color: #FAFAFA !important;
+        }
+        /* Метрики */
+        [data-testid="stMetricValue"] {
+            color: #FAFAFA !important;
+        }
+        /* Кнопки */
+        .stButton > button {
+            background-color: #262730;
+            color: #FAFAFA;
+            border: 1px solid #4B4B4B;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --- КОНСТАНТИ ---
 ADMIN_SECRET_KEY = ""
 
@@ -134,7 +190,7 @@ def check_hashes(password, hashed_text):
     return False
 
 def create_connection():
-    return sqlite3.connect('university_v13.db', check_same_thread=False)
+    return sqlite3.connect('university_v15.db', check_same_thread=False)
 
 def init_db():
     conn = create_connection()
@@ -530,11 +586,9 @@ def reports_view():
         all_students = pd.read_sql("SELECT full_name FROM students", conn)
         if not all_students.empty:
             selected_student = st.selectbox("Оберіть студента", all_students['full_name'].tolist())
-            
             info = pd.read_sql(f"SELECT * FROM students WHERE full_name='{selected_student}'", conn)
             st.write("**Інформація:**")
             st.dataframe(info, use_container_width=True)
-            
             grades = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{selected_student}'", conn)
             st.write("**Оцінки:**")
             if not grades.empty:
@@ -547,45 +601,26 @@ def reports_view():
     with t3:
         st.subheader("Генератор Зведеної Відомості")
         grp_sum = st.selectbox("Оберіть групу", list(GROUPS_DATA.keys()), key="rep_sum_grp")
-        
         available_subjects_query = f"SELECT DISTINCT subject FROM grades WHERE group_name='{grp_sum}'"
         available_subjects = pd.read_sql(available_subjects_query, conn)['subject'].tolist()
-        
-        if not available_subjects:
-            available_subjects = SUBJECTS_LIST
-            
+        if not available_subjects: available_subjects = SUBJECTS_LIST
         selected_subjects = st.multiselect("Оберіть предмети для відомості", options=available_subjects, default=available_subjects)
         
         if st.button("🔄 Згенерувати таблицю"):
             if selected_subjects:
                 subjects_placeholder = "'" + "','".join(selected_subjects) + "'"
-                query = f"""
-                    SELECT student_name, subject, AVG(grade) as final_grade 
-                    FROM grades 
-                    WHERE group_name='{grp_sum}' AND subject IN ({subjects_placeholder})
-                    GROUP BY student_name, subject
-                """
+                query = f"""SELECT student_name, subject, AVG(grade) as final_grade FROM grades WHERE group_name='{grp_sum}' AND subject IN ({subjects_placeholder}) GROUP BY student_name, subject"""
                 data = pd.read_sql(query, conn)
-                
                 if not data.empty:
                     summary_matrix = data.pivot_table(index='student_name', columns='subject', values='final_grade').fillna(0).round(0).astype(int)
                     all_students_df = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp_sum}'", conn)
                     summary_matrix = all_students_df.merge(summary_matrix, left_on='full_name', right_index=True, how='left').fillna(0)
                     summary_matrix.set_index('full_name', inplace=True)
-                    
                     st.success(f"Згенеровано відомість для групи {grp_sum}")
                     st.dataframe(summary_matrix, use_container_width=True)
-                    
-                    st.download_button(
-                        label="⬇️ Завантажити таблицю (CSV)",
-                        data=convert_df_to_csv(summary_matrix),
-                        file_name=f"zvedena_vidomist_{grp_sum}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("Для обраних предметів оцінки відсутні.")
-            else:
-                st.error("Будь ласка, оберіть хоча б один предмет.")
+                    st.download_button(label="⬇️ Завантажити таблицю (CSV)", data=convert_df_to_csv(summary_matrix), file_name=f"zvedena_vidomist_{grp_sum}.csv", mime="text/csv")
+                else: st.warning("Для обраних предметів оцінки відсутні.")
+            else: st.error("Будь ласка, оберіть хоча б один предмет.")
 
 def main():
     init_db()
@@ -599,6 +634,11 @@ def main():
     else:
         st.sidebar.title(f"👤 {st.session_state['full_name']}")
         st.sidebar.caption(f"Роль: {st.session_state['role']}")
+        
+        if st.sidebar.button("Перемкнути тему 🌓"):
+            toggle_theme()
+            st.rerun()
+            
         st.sidebar.divider()
         menu_options = {
             "🏠 Головна панель": main_panel,
@@ -614,7 +654,7 @@ def main():
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
         menu_options[selection]()
         st.sidebar.divider()
-        if st.sidebar.button("Вийти"):
+        if st.sidebar.button("Вийти 🚪"):
             st.session_state['logged_in'] = False
             st.rerun()
 
