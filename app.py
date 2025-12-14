@@ -5,6 +5,7 @@ import hashlib
 from datetime import datetime
 import io
 import altair as alt
+import re  # Для логіки переведення курсів
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="LMS ФМФКН - Деканат", layout="wide", page_icon="🎓")
@@ -58,11 +59,7 @@ else:
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
 ROLES_LIST = ["student", "starosta", "teacher", "methodist", "dean", "admin"]
-
-# Рівень 1: Викладачі та вище
 TEACHER_LEVEL = ['teacher', 'methodist', 'dean', 'admin']
-
-# Рівень 2: Деканат та вище (Повний доступ до документів та особових справ)
 DEAN_LEVEL = ['methodist', 'dean', 'admin']
 
 # --- СПИСОК ПРЕДМЕТІВ ---
@@ -163,7 +160,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS scholarship(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, type TEXT, amount INTEGER, status TEXT, date_assigned TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS system_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, details TEXT, timestamp TEXT)''')
     
-    # --- НОВА ТАБЛИЦЯ: ДЕТАЛЬНА АНКЕТА СТУДЕНТА (Вкладка "Навчання") ---
+    # --- ТАБЛИЦІ ДЛЯ АНКЕТИ ТА КОНТРАКТІВ ---
     c.execute('''CREATE TABLE IF NOT EXISTS student_education_info(
         student_name TEXT PRIMARY KEY,
         status TEXT, study_form TEXT, course INTEGER, is_contract TEXT,
@@ -175,8 +172,6 @@ def init_db():
         student_id_card TEXT, gradebook_id TEXT, library_card TEXT,
         curator TEXT, last_modified TEXT
     )''')
-    
-    # --- НОВА ТАБЛИЦЯ: ПОПЕРЕДНЯ ОСВІТА (Вкладка "Освіта") ---
     c.execute('''CREATE TABLE IF NOT EXISTS student_prev_education(
         student_name TEXT PRIMARY KEY,
         institution_name TEXT, institution_type TEXT,
@@ -184,24 +179,18 @@ def init_db():
         diploma_grades_summary TEXT, foreign_languages TEXT,
         last_modified TEXT
     )''')
-    
-    # --- НОВА ТАБЛИЦЯ: АКАДЕМІЧНІ ДОВІДКИ ---
     c.execute('''CREATE TABLE IF NOT EXISTS academic_certificates(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, cert_number TEXT, issue_date TEXT,
         source_institution TEXT, notes TEXT,
         added_by TEXT, added_date TEXT
     )''')
-
-    # --- НОВА ТАБЛИЦЯ: ІНДИВІДУАЛЬНІ ВІДОМОСТІ ---
     c.execute('''CREATE TABLE IF NOT EXISTS individual_statements(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, subject TEXT, statement_type TEXT,
         reason TEXT, date_issued TEXT, status TEXT,
         created_by TEXT
     )''')
-
-    # --- НОВА ТАБЛИЦЯ: КОНТРАКТИ СТУДЕНТІВ ---
     c.execute('''CREATE TABLE IF NOT EXISTS student_contracts(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT,
@@ -212,6 +201,18 @@ def init_db():
         paid_amount REAL,
         payment_status TEXT,
         notes TEXT
+    )''')
+
+    # --- НОВА ТАБЛИЦЯ: ЕКЗАМЕНАЦІЙНІ ВІДОМОСТІ (СЕСІЯ) ---
+    c.execute('''CREATE TABLE IF NOT EXISTS exam_sheets(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sheet_number TEXT,
+        group_name TEXT,
+        subject TEXT,
+        control_type TEXT,
+        exam_date TEXT,
+        examiner TEXT,
+        status TEXT
     )''')
 
     conn.commit()
@@ -607,7 +608,6 @@ def reports_view():
     st.title("📊 Звіти та Пошук")
     conn = create_connection()
     c = conn.cursor()
-    # Додано нову вкладку "Освіта (До вступу)"
     t1, t2, t3 = st.tabs(["📋 Відомість (Група/Предмет)", "🎓 Картка Студента", "📈 Зведена відомість"])
     
     with t1:
@@ -628,17 +628,13 @@ def reports_view():
         all_students = pd.read_sql("SELECT full_name FROM students", conn)
         if not all_students.empty:
             selected_student = st.selectbox("Оберіть студента", all_students['full_name'].tolist())
-            
-            # Вкладки всередині анкети
             tab_main, tab_edu, tab_prev_edu, tab_grades = st.tabs(["Загальна", "Навчання (Поточне)", "Освіта (До вступу)", "Успішність"])
             
-            # --- Вкладка 1: Загальна ---
             with tab_main:
                 info = pd.read_sql(f"SELECT * FROM students WHERE full_name='{selected_student}'", conn)
                 st.write("**Основні дані:**")
                 st.dataframe(info, use_container_width=True)
 
-            # --- Вкладка 2: Навчання (Вже додано в v21) ---
             with tab_edu:
                 edu_data = pd.read_sql(f"SELECT * FROM student_education_info WHERE student_name='{selected_student}'", conn)
                 d = edu_data.iloc[0].to_dict() if not edu_data.empty else {}
@@ -652,7 +648,6 @@ def reports_view():
                     faculty = c4.text_input("Факультет", value=d.get('faculty', "ФМФКН"), disabled=disabled)
                     specialty = c5.text_input("Спеціальність / ОПП", value=d.get('edu_program', ""), disabled=disabled)
                     is_contract = st.checkbox("Контракт", value=(d.get('is_contract') == 'True'), disabled=disabled)
-                    
                     st.divider()
                     st.markdown("Накази")
                     c9, c10, c11 = st.columns(3)
@@ -672,12 +667,10 @@ def reports_view():
                             st.success("Дані збережено!")
                             st.rerun()
 
-            # --- Вкладка 3: Освіта (Попередня) - НОВЕ ---
             with tab_prev_edu:
                 st.markdown("### Документ про освіту (вступний)")
                 prev_data = pd.read_sql(f"SELECT * FROM student_prev_education WHERE student_name='{selected_student}'", conn)
                 p = prev_data.iloc[0].to_dict() if not prev_data.empty else {}
-                
                 disabled_prev = st.session_state['role'] not in DEAN_LEVEL
                 
                 with st.form("prev_edu_form"):
@@ -690,7 +683,6 @@ def reports_view():
                     dip_type = c_d1.text_input("Тип документу", value=p.get('diploma_type', "Атестат"), disabled=disabled_prev)
                     dip_ser = c_d2.text_input("Серія", value=p.get('diploma_series', ""), disabled=disabled_prev)
                     dip_num = c_d3.text_input("Номер", value=p.get('diploma_number', ""), disabled=disabled_prev)
-                    
                     dip_grades = st.text_area("Оцінки з додатку (Короткий зміст)", value=p.get('diploma_grades_summary', ""), disabled=disabled_prev)
                     
                     st.markdown("#### Інше")
@@ -716,7 +708,6 @@ def reports_view():
                             st.success("Дані про освіту збережено!")
                             st.rerun()
 
-            # --- Вкладка 4: Успішність ---
             with tab_grades:
                 grades = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{selected_student}'", conn)
                 if not grades.empty:
@@ -752,7 +743,6 @@ def reports_view():
 
 def deanery_modules_view():
     st.title("🏛️ Модулі Деканату")
-    # Доступ тільки для адмінів та деканату
     if st.session_state['role'] not in DEAN_LEVEL:
         st.error("У вас немає доступу до цієї панелі.")
         return
@@ -762,7 +752,6 @@ def deanery_modules_view():
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔄 ЄДЕБО", "🛏️ Гуртожиток", "💰 Стипендія", "📜 Академ. Довідки", "📝 Інд. Відомості", "📄 Контракти"])
 
-    # --- ТАБ 1: ЄДЕБО ---
     with tab1:
         st.header("Єдина державна електронна база з питань освіти")
         col_ex, col_im = st.columns(2)
@@ -784,7 +773,6 @@ def deanery_modules_view():
             if uploaded_edebo:
                 st.success("Файл проаналізовано.")
 
-    # --- ТАБ 2: ГУРТОЖИТОК ---
     with tab2:
         st.header("Управління поселенням")
         c1, c2 = st.columns([1, 2])
@@ -817,7 +805,6 @@ def deanery_modules_view():
                 st.dataframe(dorm_df.style.map(highlight_debt, subset=['payment_status']), use_container_width=True)
             else: st.info("У гуртожитку поки ніхто не живе.")
 
-    # --- ТАБ 3: СТИПЕНДІЯ ---
     with tab3:
         st.header("Стипендіальна комісія")
         st.markdown("#### 📊 Автоматичний розрахунок рейтингу")
@@ -851,11 +838,9 @@ def deanery_modules_view():
                 st.metric("Місячний фонд стипендій", f"{total_budget} грн")
             else: st.info("Стипендій не призначено.")
 
-    # --- ТАБ 4: АКАДЕМІЧНІ ДОВІДКИ (НОВЕ) ---
     with tab4:
         st.header("Академічні довідки (Переведення)")
         st.info("Реєстрація довідок від студентів, що перевелися з інших ЗВО.")
-        
         c_acad1, c_acad2 = st.columns(2)
         with c_acad1:
             with st.form("new_acad_cert"):
@@ -866,24 +851,20 @@ def deanery_modules_view():
                 issue_dt = st.date_input("Дата видачі")
                 source = st.text_input("Звідки видана (ЗВО/Факультет)")
                 notes = st.text_area("Деталі (кредити, предмети)")
-                
                 if st.form_submit_button("Зареєструвати довідку"):
                     c.execute("INSERT INTO academic_certificates (student_name, cert_number, issue_date, source_institution, notes, added_by, added_date) VALUES (?,?,?,?,?,?,?)",
                               (s_name, cert_num, str(issue_dt), source, notes, st.session_state['full_name'], str(datetime.now().date())))
                     conn.commit()
                     st.success("Довідку додано!")
                     st.rerun()
-        
         with c_acad2:
             st.subheader("🗂️ Реєстр довідок")
             df_certs = pd.read_sql("SELECT * FROM academic_certificates", conn)
             st.dataframe(df_certs, use_container_width=True)
 
-    # --- ТАБ 5: ІНДИВІДУАЛЬНІ ВІДОМОСТІ (НОВЕ) ---
     with tab5:
         st.header("Індивідуальні відомості")
         st.info("Формування відомостей для окремих випадків.")
-        
         c_ind1, c_ind2 = st.columns(2)
         with c_ind1:
             with st.form("new_ind_statement"):
@@ -899,54 +880,39 @@ def deanery_modules_view():
                     "Позапланова дисципліна"
                 ])
                 reason = st.text_input("Підстава (№ розпорядження/заяви)")
-                
                 if st.form_submit_button("Сформувати"):
                     c.execute("INSERT INTO individual_statements (student_name, subject, statement_type, reason, date_issued, status, created_by) VALUES (?,?,?,?,?,?,?)",
                               (s_ind, subj_ind, type_ind, reason, str(datetime.now().date()), "Активна", st.session_state['full_name']))
                     conn.commit()
                     st.success(f"Відомість '{type_ind}' створено!")
                     st.rerun()
-
         with c_ind2:
             st.subheader("🗃️ Активні індивідуальні відомості")
             df_inds = pd.read_sql("SELECT * FROM individual_statements", conn)
             st.dataframe(df_inds, use_container_width=True)
 
-    # --- ТАБ 6: КОНТРАКТИ СТУДЕНТІВ (НОВЕ) ---
     with tab6:
         st.header("Управління контрактами")
         st.info("Облік фінансових зобов'язань студентів контрактної форми навчання.")
-
         col_con1, col_con2 = st.columns([1, 2])
-
-        # --- ФОРМА ДОДАВАННЯ/РЕДАГУВАННЯ ---
         with col_con1:
             with st.form("contract_form"):
                 st.subheader("📝 Дані договору")
                 st_list_c = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
                 s_contract = st.selectbox("Студент", st_list_c)
-                
                 c_num = st.text_input("Номер договору")
-                
                 cd1, cd2 = st.columns(2)
                 d_sign = cd1.date_input("Дата підписання")
                 d_end = cd2.date_input("Термін дії до")
-                
                 cm1, cm2 = st.columns(2)
                 amount_total = cm1.number_input("Загальна вартість (грн)", min_value=0.0, step=100.0)
                 amount_paid = cm2.number_input("Сплачено (грн)", min_value=0.0, step=100.0)
-                
                 notes_c = st.text_area("Умови оплати / Примітки")
-                
-                # Автоматичний статус
                 calc_debt = amount_total - amount_paid
                 status_c = "Сплачено повністю" if calc_debt <= 0 else f"Борг: {calc_debt} грн"
                 if amount_paid == 0: status_c = "Не оплачено"
-
                 if st.form_submit_button("Зберегти контракт"):
-                    # Перевірка чи існує контракт
                     exists_c = c.execute("SELECT id FROM student_contracts WHERE student_name=? AND contract_number=?", (s_contract, c_num)).fetchone()
-                    
                     if exists_c:
                         c.execute("""UPDATE student_contracts SET 
                                      date_signed=?, end_date=?, total_amount=?, paid_amount=?, payment_status=?, notes=? 
@@ -961,34 +927,216 @@ def deanery_modules_view():
                         st.success("Новий контракт зареєстровано!")
                     conn.commit()
                     st.rerun()
-
-        # --- ТАБЛИЦЯ ---
         with col_con2:
             st.subheader("📂 Реєстр договорів")
-            
-            # Статистика
             total_debt_query = "SELECT SUM(total_amount - paid_amount) FROM student_contracts WHERE total_amount > paid_amount"
             debt_sum = c.execute(total_debt_query).fetchone()[0]
             debt_sum = debt_sum if debt_sum else 0
-            
             st.metric("Загальна заборгованість по факультету", f"{debt_sum:,.2f} грн")
-            
             df_contracts = pd.read_sql("SELECT * FROM student_contracts", conn)
-            
             if not df_contracts.empty:
-                # Підсвітка боржників
                 def highlight_debt_contract(val):
                     if isinstance(val, str) and "Борг" in val:
                         return 'color: #ff4b4b; font-weight: bold'
                     elif isinstance(val, str) and "Не оплачено" in val:
                         return 'color: #ff4b4b'
                     return 'color: #00cc66'
-
                 st.dataframe(df_contracts.style.map(highlight_debt_contract, subset=['payment_status']), use_container_width=True)
-                
                 st.download_button("⬇️ Завантажити реєстр (CSV)", convert_df_to_csv(df_contracts), "contracts_registry.csv", "text/csv")
             else:
                 st.info("Контрактів ще не додано.")
+
+# --- НОВИЙ МОДУЛЬ: СЕСІЯ ТА РУХ КОНТИНГЕНТУ ---
+def session_module_view():
+    st.title("🎓 Сесія та Рух контингенту")
+    if st.session_state['role'] not in DEAN_LEVEL:
+        st.error("Доступ заборонено.")
+        return
+
+    conn = create_connection()
+    c = conn.cursor()
+
+    tab_session, tab_grading, tab_movement = st.tabs(["📑 Відомості (Сесія)", "✍️ Внесення оцінок", "🚀 Рух студентів"])
+
+    # --- ВКЛАДКА 1: СТВОРЕННЯ ВІДОМОСТЕЙ ---
+    with tab_session:
+        st.header("Підготовка екзаменаційних відомостей")
+        
+        c1, c2 = st.columns([1, 2])
+        
+        with c1:
+            with st.form("create_sheet"):
+                st.subheader("➕ Створити відомість")
+                sheet_num = st.text_input("Номер відомості (№)")
+                group_sel = st.selectbox("Група", list(GROUPS_DATA.keys()))
+                subj_sel = st.selectbox("Дисципліна", SUBJECTS_LIST)
+                control_type = st.selectbox("Тип контролю", ["Екзамен", "Залік", "Диференційований залік", "Перездача", "Комісія"])
+                date_exam = st.date_input("Дата проведення")
+                examiner = st.text_input("Екзаменатор", value=st.session_state['full_name'])
+                
+                if st.form_submit_button("Згенерувати відомість"):
+                    if sheet_num:
+                        c.execute("""INSERT INTO exam_sheets (sheet_number, group_name, subject, control_type, exam_date, examiner, status)
+                                     VALUES (?,?,?,?,?,?,?)""", 
+                                     (sheet_num, group_sel, subj_sel, control_type, str(date_exam), examiner, "Відкрита"))
+                        conn.commit()
+                        st.success(f"Відомість №{sheet_num} створена!")
+                        st.rerun()
+                    else:
+                        st.warning("Вкажіть номер відомості.")
+
+        with c2:
+            st.subheader("📂 Журнал відомостей")
+            sheets_df = pd.read_sql("SELECT * FROM exam_sheets ORDER BY id DESC", conn)
+            st.dataframe(sheets_df, use_container_width=True)
+            
+            if not sheets_df.empty:
+                st.download_button("⬇️ Завантажити реєстр відомостей", convert_df_to_csv(sheets_df), "exam_sheets.csv", "text/csv")
+
+    # --- ВКЛАДКА 2: ВНЕСЕННЯ ОЦІНОК ---
+    with tab_grading:
+        st.header("Занесення оцінок до бази даних")
+        st.info("Оцінки, внесені тут, автоматично потрапляють у загальний журнал успішності та відомість.")
+        
+        # Вибір відомості
+        sheets = pd.read_sql("SELECT id, sheet_number, group_name, subject, control_type FROM exam_sheets WHERE status='Відкрита'", conn)
+        
+        if not sheets.empty:
+            sheet_options = sheets.apply(lambda x: f"№{x['sheet_number']} | {x['group_name']} | {x['subject']} ({x['control_type']})", axis=1)
+            selected_sheet_str = st.selectbox("Оберіть активну відомість:", sheet_options)
+            
+            # Отримання даних обраної відомості
+            sheet_idx = sheet_options[sheet_options == selected_sheet_str].index[0]
+            sel_sheet_data = sheets.iloc[sheet_idx]
+            
+            curr_group = sel_sheet_data['group_name']
+            curr_subj = sel_sheet_data['subject']
+            curr_type = sel_sheet_data['control_type']
+            
+            st.markdown(f"**Група:** {curr_group} | **Предмет:** {curr_subj} | **Тип:** {curr_type}")
+            
+            # Отримання студентів
+            students_list = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{curr_group}'", conn)['full_name'].tolist()
+            
+            # Отримання існуючих оцінок з таблиці GRADES
+            # Ми використовуємо control_type як назву колонки в grades
+            existing_grades = pd.read_sql(f"""SELECT student_name, grade FROM grades 
+                                              WHERE group_name='{curr_group}' AND subject='{curr_subj}' AND type_of_work='{curr_type}'""", conn)
+            
+            # Формування DF для редагування
+            data = []
+            for student in students_list:
+                grade = 0
+                found = existing_grades[existing_grades['student_name'] == student]
+                if not found.empty:
+                    grade = found.iloc[0]['grade']
+                data.append({"Студент": student, "Оцінка": grade})
+            
+            df_grading = pd.DataFrame(data)
+            
+            st.write("Проставте оцінки у таблиці нижче:")
+            edited_grades = st.data_editor(df_grading, use_container_width=True)
+            
+            if st.button("💾 Зберегти оцінки в БД"):
+                date_now = str(datetime.now().date())
+                count_updated = 0
+                
+                for index, row in edited_grades.iterrows():
+                    s_name = row['Студент']
+                    s_grade = row['Оцінка']
+                    
+                    # Перевірка чи є запис
+                    check = c.execute(f"""SELECT id FROM grades 
+                                          WHERE student_name=? AND subject=? AND type_of_work=?""", 
+                                          (s_name, curr_subj, curr_type)).fetchone()
+                    
+                    if check:
+                        c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
+                    else:
+                        c.execute("""INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
+                                     VALUES (?,?,?,?,?,?)""", (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
+                    count_updated += 1
+                
+                conn.commit()
+                st.success(f"Успішно збережено {count_updated} оцінок!")
+                log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки по відомості для {curr_group}, {curr_subj}")
+        
+        else:
+            st.warning("Немає відкритих відомостей. Створіть нову у вкладці 'Відомості'.")
+
+    # --- ВКЛАДКА 3: РУХ КОНТИНГЕНТУ ---
+    with tab_movement:
+        st.header("Переведення на наступний навчальний рік")
+        
+        col_move1, col_move2 = st.columns(2)
+        
+        with col_move1:
+            st.subheader("🔄 Переведення групи (курс +1)")
+            move_group = st.selectbox("Оберіть групу для переведення", list(GROUPS_DATA.keys()), key="move_grp")
+            
+            # Логіка визначення наступної назви
+            next_name = move_group
+            match = re.match(r"(\d+)(.*)", move_group)
+            is_graduating = False
+            
+            if match:
+                num = int(match.group(1))
+                rest = match.group(2)
+                if num < 4:
+                    next_name = f"{num+1}{rest}"
+                else:
+                    next_name = f"Випуск-{move_group}"
+                    is_graduating = True
+            
+            new_group_name = st.text_input("Нова назва групи:", value=next_name)
+            
+            if st.button("Виконати переведення"):
+                if is_graduating:
+                    # Позначаємо як випускників в education_info і видаляємо зі списку активних
+                    students_to_grad = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{move_group}'", conn)['full_name'].tolist()
+                    for s in students_to_grad:
+                        # Оновлення статусу
+                        c.execute("UPDATE student_education_info SET status='Випускник' WHERE student_name=?", (s,))
+                        # Видалення з активних (або переміщення в групу Випуск)
+                        c.execute("UPDATE students SET group_name=? WHERE full_name=?", (new_group_name, s))
+                    st.success(f"Група {move_group} випущена! Статус студентів оновлено.")
+                else:
+                    # Просто змінюємо назву групи
+                    c.execute("UPDATE students SET group_name=? WHERE group_name=?", (new_group_name, move_group))
+                    # Оновлюємо курс в education_info
+                    c.execute(f"UPDATE student_education_info SET course = course + 1 WHERE student_name IN (SELECT full_name FROM students WHERE group_name=?)", (new_group_name,))
+                    st.success(f"Групу {move_group} переведено в {new_group_name}!")
+                
+                conn.commit()
+                log_action(st.session_state['full_name'], "Group Move", f"Переведено групу {move_group} -> {new_group_name}")
+                st.rerun()
+
+        with col_move2:
+            st.subheader("🚫 Відрахування / Академвідпустка")
+            action_type = st.selectbox("Дія", ["Відрахування", "Академвідпустка"])
+            
+            all_students_m = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
+            student_to_action = st.selectbox("Студент", all_students_m, key="st_action")
+            reason_move = st.text_input("Причина / № Наказу")
+            
+            if st.button("Застосувати"):
+                status_map = {"Відрахування": "Відрахований", "Академвідпустка": "У академвідпустці"}
+                new_status = status_map[action_type]
+                
+                # Оновлення статусу
+                c.execute("INSERT OR IGNORE INTO student_education_info (student_name) VALUES (?)", (student_to_action,))
+                c.execute("UPDATE student_education_info SET status=? WHERE student_name=?", (new_status, student_to_action))
+                
+                # Якщо відрахування - видаляємо зі списку активних студентів
+                if action_type == "Відрахування":
+                    c.execute("DELETE FROM students WHERE full_name=?", (student_to_action,))
+                    st.warning(f"Студента {student_to_action} відраховано та видалено зі списків.")
+                else:
+                    st.info(f"Статус студента {student_to_action} змінено на '{new_status}'.")
+                
+                conn.commit()
+                log_action(st.session_state['full_name'], "Student Status Change", f"{student_to_action}: {new_status} ({reason_move})")
+                st.rerun()
 
 def system_settings_view():
     st.title("⚙️ Системні налаштування")
@@ -1083,7 +1231,8 @@ def main():
         
         # Додаткові пункти для Адміністрації та Деканату (але не Викладачів)
         if st.session_state['role'] in DEAN_LEVEL:
-            menu_options["Модулі Деканату"] = deanery_modules_view
+            menu_options["🏛️ Модулі Деканату"] = deanery_modules_view
+            menu_options["🎓 Сесія та Рух"] = session_module_view  # --- ДОДАНО НОВИЙ ПУНКТ ---
         
         # Системні налаштування тільки для Admin
         if st.session_state['role'] == 'admin':
