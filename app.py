@@ -7,7 +7,7 @@ import io
 import altair as alt
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-st.set_page_config(page_title="LMS ФМФКН", layout="wide", page_icon="🎓")
+st.set_page_config(page_title="LMS ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
 # --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ (Dark/Light Mode) ---
 if 'theme' not in st.session_state:
@@ -20,88 +20,36 @@ def toggle_theme():
         st.session_state.theme = 'light'
 
 # --- CSS СТИЛІ ДЛЯ ТЕМ ---
-# Тут ми жорстко задаємо кольори тексту та фону
-
 dark_css = """
 <style>
-    /* Глобальний фон та текст */
-    .stApp {
-        background-color: #0E1117;
-        color: #FFFFFF;
+    .stApp { background-color: #0E1117; color: #FFFFFF; }
+    [data-testid="stSidebar"] { background-color: #262730; }
+    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #FFFFFF !important; }
+    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div, .stNumberInput > div > div {
+        background-color: #41444C !important; color: #FFFFFF !important;
     }
-    /* Бічна панель */
-    [data-testid="stSidebar"] {
-        background-color: #262730;
-    }
-    /* Всі заголовки та текст */
-    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown {
-        color: #FFFFFF !important;
-    }
-    /* Поля вводу (Input, Select, Textarea) - щоб текст був білим на темному */
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div {
-        background-color: #41444C !important;
-        color: #FFFFFF !important;
-    }
-    input, textarea {
-        color: #FFFFFF !important; 
-    }
-    /* Таблиці */
-    [data-testid="stDataFrame"], [data-testid="stTable"] {
-        color: #FFFFFF !important;
-    }
-    /* Експандери (розгорталки) */
-    .streamlit-expanderHeader {
-        background-color: #262730 !important;
-        color: #FFFFFF !important;
-    }
-    /* Кнопки */
-    button {
-        color: #FFFFFF !important;
-    }
+    input, textarea { color: #FFFFFF !important; }
+    [data-testid="stDataFrame"], [data-testid="stTable"] { color: #FFFFFF !important; }
+    .streamlit-expanderHeader { background-color: #262730 !important; color: #FFFFFF !important; }
+    button { color: #FFFFFF !important; }
 </style>
 """
 
 light_css = """
 <style>
-    /* Глобальний фон та текст */
-    .stApp {
-        background-color: #FFFFFF;
-        color: #000000;
+    .stApp { background-color: #FFFFFF; color: #000000; }
+    [data-testid="stSidebar"] { background-color: #F0F2F6; }
+    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #000000 !important; }
+    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div, .stNumberInput > div > div {
+        background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #D3D3D3;
     }
-    /* Бічна панель */
-    [data-testid="stSidebar"] {
-        background-color: #F0F2F6;
-    }
-    /* Всі заголовки та текст */
-    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown {
-        color: #000000 !important;
-    }
-    /* Поля вводу - чорний текст на білому */
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
-        border: 1px solid #D3D3D3;
-    }
-    input, textarea {
-        color: #000000 !important;
-    }
-    /* Таблиці */
-    [data-testid="stDataFrame"], [data-testid="stTable"] {
-        color: #000000 !important;
-    }
-    /* Експандери */
-    .streamlit-expanderHeader {
-        background-color: #F0F2F6 !important;
-        color: #000000 !important;
-    }
-    /* Кнопки */
-    button {
-        color: #000000 !important;
-    }
+    input, textarea { color: #000000 !important; }
+    [data-testid="stDataFrame"], [data-testid="stTable"] { color: #000000 !important; }
+    .streamlit-expanderHeader { background-color: #F0F2F6 !important; color: #000000 !important; }
+    button { color: #000000 !important; }
 </style>
 """
 
-# Застосування вибраної теми
 if st.session_state.theme == 'dark':
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
@@ -109,72 +57,31 @@ else:
 
 
 # --- КОНСТАНТИ ---
-ADMIN_SECRET_KEY = ""
+ADMIN_SECRET_KEY = "" # Можна задати секретний ключ для реєстрації адмінів
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
-    # Базові
-    "Математичний аналіз", 
-    "Програмування", 
-    "Аналітична геометрія", 
-    "Дискретна математика", 
-    "Фізика", 
-    "Англійська мова", 
-    "Філософія",
-    "Числові системи",
-    "Елементарна математика",
-    "Шкільний курс алгебри",
-    "Шкільний курс геометрії",
-    "Основи алгебри і дискретної математики",
-    "Лінійна алгебра і дискретна математика",
-    "Вступ до спеціальності",
-    "Основи статистики і аналізу даних",
-    "Експериментальна фізика",
-    "Алгебра і теорія чисел",
-    "Загальна психологія",
-    "Інформатика",
-    "Основи структурного та об'єктно-орієнтованого програмування",
-    "Загальна фізика",
-    "Методика виховної роботи",
-    "Технології навчання фізики та інформатики",
-    "Системи керування базами даних",
-    "Диференціальні рівняння",
-    "Функціональний аналіз",
-    "Бази даних та інформаційні системи",
-    "Методика навчання інформатики",
-    "Методика навчання математики",
-    "Алгоритми і структури даних",
-    "Основи педагогічної майстерності",
-    "Теоретична фізика",
-    "Інтегральні рівняння і варіаційне числення",
-    "Методика навчання фізики",
-    # Нові додані предмети
-    "Методи обчислень",
-    "Теорія і методика поглибленого навчання стереометрії",
-    "Фізика та методика її навчання у ліцеях",
-    "Системи комп'ютерної математики",
-    "Теорія і практика математичних олімпіад",
-    "Додаткові розділи геометрії",
-    "Педагогіка і психологія вищої школи",
-    "Методологія та цифрові технології наукових досліджень у математиці",
-    "Машинне навчання в освіті",
-    "Вибрані питання сучасної дидактики фізики",
-    "Педагогіка і психологія профільної середньої освіти",
-    "Вибрані питання вищої математики",
-    "Теорія і методика поглибленого навчання алгебри і початків аналізу",
-    "Астрофізика",
-    "Цивільний захист",
-    "Математичні моделі і моделі в освіті/педагогіці",
-    "Практикум з фізичного експерименту",
-    "Статистичні методи обробки експериментальних даних",
-    "Основи теорії солітонів",
-    "Ймовірнісно-статистичні методи досліджень",
-    "Основи машинного навчання",
-    "Основи штучного інтелекту",
-    "Загальна фізика. Оптика",
-    "Практикум розв'язування задач з оптики",
-    "Практикум розв'язування олімпіадних задач з алгебри",
-    "Основи теорії інтелектуальних систем"
+    "Математичний аналіз", "Програмування", "Аналітична геометрія", "Дискретна математика", 
+    "Фізика", "Англійська мова", "Філософія", "Числові системи", "Елементарна математика", 
+    "Шкільний курс алгебри", "Шкільний курс геометрії", "Основи алгебри і дискретної математики", 
+    "Лінійна алгебра і дискретна математика", "Вступ до спеціальності", "Основи статистики і аналізу даних", 
+    "Експериментальна фізика", "Алгебра і теорія чисел", "Загальна психологія", "Інформатика", 
+    "Основи структурного та об'єктно-орієнтованого програмування", "Загальна фізика", 
+    "Методика виховної роботи", "Технології навчання фізики та інформатики", "Системи керування базами даних", 
+    "Диференціальні рівняння", "Функціональний аналіз", "Бази даних та інформаційні системи", 
+    "Методика навчання інформатики", "Методика навчання математики", "Алгоритми і структури даних", 
+    "Основи педагогічної майстерності", "Теоретична фізика", "Інтегральні рівняння і варіаційне числення", 
+    "Методика навчання фізики", "Методи обчислень", "Теорія і методика поглибленого навчання стереометрії", 
+    "Фізика та методика її навчання у ліцеях", "Системи комп'ютерної математики", 
+    "Теорія і практика математичних олімпіад", "Додаткові розділи геометрії", "Педагогіка і психологія вищої школи", 
+    "Методологія та цифрові технології наукових досліджень у математиці", "Машинне навчання в освіті", 
+    "Вибрані питання сучасної дидактики фізики", "Педагогіка і психологія профільної середньої освіти", 
+    "Вибрані питання вищої математики", "Теорія і методика поглибленого навчання алгебри і початків аналізу", 
+    "Астрофізика", "Цивільний захист", "Математичні моделі і моделі в освіті/педагогіці", 
+    "Практикум з фізичного експерименту", "Статистичні методи обробки експериментальних даних", 
+    "Основи теорії солітонів", "Ймовірнісно-статистичні методи досліджень", "Основи машинного навчання", 
+    "Основи штучного інтелекту", "Загальна фізика. Оптика", "Практикум розв'язування задач з оптики", 
+    "Практикум розв'язування олімпіадних задач з алгебри", "Основи теорії інтелектуальних систем"
 ]
 
 # --- ДАНІ (Студенти) ---
@@ -233,7 +140,7 @@ def check_hashes(password, hashed_text):
     return False
 
 def create_connection():
-    return sqlite3.connect('university_v16.db', check_same_thread=False)
+    return sqlite3.connect('university_v17.db', check_same_thread=False)
 
 def init_db():
     conn = create_connection()
@@ -246,6 +153,11 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS grades(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, type_of_work TEXT, grade INTEGER, date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, date_column TEXT, status TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS news(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, message TEXT, author TEXT, date TEXT)''')
+    
+    # --- НОВІ ТАБЛИЦІ ДЛЯ АДМІН ІНТЕГРАЦІЙ ---
+    c.execute('''CREATE TABLE IF NOT EXISTS dormitory(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, room_number TEXT, payment_status TEXT, comments TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS scholarship(id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, type TEXT, amount INTEGER, status TEXT, date_assigned TEXT)''')
+    
     conn.commit()
 
     c.execute('SELECT count(*) FROM students')
@@ -665,6 +577,109 @@ def reports_view():
                 else: st.warning("Для обраних предметів оцінки відсутні.")
             else: st.error("Будь ласка, оберіть хоча б один предмет.")
 
+def admin_integrations_view():
+    st.title("🏛️ Адміністративні інтеграції")
+    
+    if st.session_state['role'] == 'student':
+        st.warning("У вас немає доступу до панелі керування інтеграціями.")
+        return
+
+    conn = create_connection()
+    c = conn.cursor()
+
+    tab1, tab2, tab3 = st.tabs(["🔄 ЄДЕБО Інтеграція", "🛏️ Гуртожиток", "💰 Стипендія"])
+
+    # --- ТАБ 1: ЄДЕБО (Експорт/Імпорт) ---
+    with tab1:
+        st.header("Єдина державна електронна база з питань освіти")
+        st.markdown("Імпорт та експорт даних студентів для синхронізації з державною базою.")
+        col_ex, col_im = st.columns(2)
+        with col_ex:
+            st.subheader("📤 Експорт даних")
+            format_type = st.radio("Формат експорту:", ["JSON", "XML (Beta)"])
+            if st.button("Згенерувати файл для ЄДЕБО"):
+                query = """SELECT s.full_name, s.group_name, u.role FROM students s LEFT JOIN users u ON s.full_name = u.full_name"""
+                df_edebo = pd.read_sql(query, conn)
+                if format_type == "JSON":
+                    json_data = df_edebo.to_json(orient='records', force_ascii=False)
+                    st.download_button(label="⬇️ Завантажити JSON", data=json_data, file_name=f"edebo_export_{datetime.now().date()}.json", mime="application/json")
+                else:
+                    xml_data = df_edebo.to_csv(index=False) 
+                    st.info("XML генерація потребує бібліотеки lxml. Використано CSV як проміжний формат.")
+                    st.download_button(label="⬇️ Завантажити XML/CSV", data=xml_data, file_name=f"edebo_export_{datetime.now().date()}.csv", mime="text/csv")
+        with col_im:
+            st.subheader("📥 Імпорт наказів")
+            uploaded_edebo = st.file_uploader("Завантажте файл з ЄДЕБО (JSON/XML)", type=['json', 'xml'])
+            if uploaded_edebo:
+                st.success("Файл проаналізовано. Система готова до синхронізації (Демо-режим).")
+
+    # --- ТАБ 2: ГУРТОЖИТОК ---
+    with tab2:
+        st.header("Управління поселенням (Студмістечко)")
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            with st.form("dorm_assign"):
+                st.subheader("🏠 Поселення")
+                all_students = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
+                student = st.selectbox("Студент", all_students)
+                room = st.text_input("Номер кімнати", placeholder="Напр. 405-Б")
+                paid = st.checkbox("Оплата за семестр внесена?")
+                comment = st.text_area("Примітка (стан кімнати/інвентар)")
+                if st.form_submit_button("Зберегти"):
+                    status = "Оплачено" if paid else "Борг"
+                    exists = c.execute("SELECT id FROM dormitory WHERE student_name=?", (student,)).fetchone()
+                    if exists:
+                        c.execute("UPDATE dormitory SET room_number=?, payment_status=?, comments=? WHERE student_name=?", (room, status, comment, student))
+                        st.info("Дані оновлено!")
+                    else:
+                        c.execute("INSERT INTO dormitory (student_name, room_number, payment_status, comments) VALUES (?,?,?,?)", (student, room, status, comment))
+                        st.success("Студента поселено!")
+                    conn.commit()
+                    st.rerun()
+        with c2:
+            st.subheader("📋 Списки мешканців")
+            dorm_df = pd.read_sql("SELECT * FROM dormitory", conn)
+            if not dorm_df.empty:
+                def highlight_debt(val):
+                    color = '#ff4b4b' if val == 'Борг' else '#00cc66'
+                    return f'color: {color}'
+                st.dataframe(dorm_df.style.map(highlight_debt, subset=['payment_status']), use_container_width=True)
+            else: st.info("У гуртожитку поки ніхто не живе.")
+
+    # --- ТАБ 3: СТИПЕНДІЯ ---
+    with tab3:
+        st.header("Стипендіальна комісія")
+        st.markdown("#### 📊 Автоматичний розрахунок рейтингу")
+        if st.button("Оновити рейтинг успішності"):
+            grade_query = "SELECT student_name, AVG(grade) as avg_score FROM grades GROUP BY student_name HAVING avg_score >= 4.0 ORDER BY avg_score DESC"
+            rating_df = pd.read_sql(grade_query, conn)
+            st.dataframe(rating_df, use_container_width=True)
+            st.caption("*Показані студенти з балом 4.0 і вище")
+        st.divider()
+        col_schol1, col_schol2 = st.columns(2)
+        with col_schol1:
+            with st.form("add_scholarship"):
+                st.subheader("Призначення стипендії")
+                st_list = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
+                sch_student = st.selectbox("Студент", st_list, key="sch_st")
+                sch_type = st.selectbox("Тип", ["Академічна (Звичайна)", "Академічна (Підвищена)", "Соціальна", "Президентська"])
+                sch_amount = st.number_input("Сума (грн)", value=2000, step=100)
+                if st.form_submit_button("Призначити"):
+                    date_now = datetime.now().strftime("%Y-%m-%d")
+                    c.execute("INSERT INTO scholarship (student_name, type, amount, status, date_assigned) VALUES (?,?,?,?,?)", 
+                              (sch_student, sch_type, sch_amount, "Активна", date_now))
+                    conn.commit()
+                    st.success("Стипендію призначено!")
+                    st.rerun()
+        with col_schol2:
+            st.subheader("💰 Активні стипендіати")
+            sch_df = pd.read_sql("SELECT student_name, type, amount, status, date_assigned FROM scholarship", conn)
+            if not sch_df.empty:
+                st.dataframe(sch_df, use_container_width=True)
+                total_budget = sch_df[sch_df['status']=='Активна']['amount'].sum()
+                st.metric("Місячний фонд стипендій", f"{total_budget} грн")
+            else: st.info("Стипендій не призначено.")
+
 def main():
     init_db()
     if 'logged_in' not in st.session_state:
@@ -692,7 +707,8 @@ def main():
             "Журнал відвідуваності": attendance_view,
             "Звіти та Пошук": reports_view,
             "Документообіг": documents_view,
-            "Файловий репозиторій": file_repository_view
+            "Файловий репозиторій": file_repository_view,
+            "Адмін. Інтеграції (Деканат)": admin_integrations_view
         }
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
         menu_options[selection]()
