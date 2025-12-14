@@ -201,6 +201,19 @@ def init_db():
         created_by TEXT
     )''')
 
+    # --- НОВА ТАБЛИЦЯ: КОНТРАКТИ СТУДЕНТІВ ---
+    c.execute('''CREATE TABLE IF NOT EXISTS student_contracts(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_name TEXT,
+        contract_number TEXT,
+        date_signed TEXT,
+        end_date TEXT,
+        total_amount REAL,
+        paid_amount REAL,
+        payment_status TEXT,
+        notes TEXT
+    )''')
+
     conn.commit()
 
     c.execute('SELECT count(*) FROM students')
@@ -747,7 +760,7 @@ def deanery_modules_view():
     conn = create_connection()
     c = conn.cursor()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔄 ЄДЕБО", "🛏️ Гуртожиток", "💰 Стипендія", "📜 Академ. Довідки", "📝 Інд. Відомості"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔄 ЄДЕБО", "🛏️ Гуртожиток", "💰 Стипендія", "📜 Академ. Довідки", "📝 Інд. Відомості", "📄 Контракти"])
 
     # --- ТАБ 1: ЄДЕБО ---
     with tab1:
@@ -898,6 +911,84 @@ def deanery_modules_view():
             st.subheader("🗃️ Активні індивідуальні відомості")
             df_inds = pd.read_sql("SELECT * FROM individual_statements", conn)
             st.dataframe(df_inds, use_container_width=True)
+
+    # --- ТАБ 6: КОНТРАКТИ СТУДЕНТІВ (НОВЕ) ---
+    with tab6:
+        st.header("Управління контрактами")
+        st.info("Облік фінансових зобов'язань студентів контрактної форми навчання.")
+
+        col_con1, col_con2 = st.columns([1, 2])
+
+        # --- ФОРМА ДОДАВАННЯ/РЕДАГУВАННЯ ---
+        with col_con1:
+            with st.form("contract_form"):
+                st.subheader("📝 Дані договору")
+                st_list_c = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
+                s_contract = st.selectbox("Студент", st_list_c)
+                
+                c_num = st.text_input("Номер договору")
+                
+                cd1, cd2 = st.columns(2)
+                d_sign = cd1.date_input("Дата підписання")
+                d_end = cd2.date_input("Термін дії до")
+                
+                cm1, cm2 = st.columns(2)
+                amount_total = cm1.number_input("Загальна вартість (грн)", min_value=0.0, step=100.0)
+                amount_paid = cm2.number_input("Сплачено (грн)", min_value=0.0, step=100.0)
+                
+                notes_c = st.text_area("Умови оплати / Примітки")
+                
+                # Автоматичний статус
+                calc_debt = amount_total - amount_paid
+                status_c = "Сплачено повністю" if calc_debt <= 0 else f"Борг: {calc_debt} грн"
+                if amount_paid == 0: status_c = "Не оплачено"
+
+                if st.form_submit_button("Зберегти контракт"):
+                    # Перевірка чи існує контракт
+                    exists_c = c.execute("SELECT id FROM student_contracts WHERE student_name=? AND contract_number=?", (s_contract, c_num)).fetchone()
+                    
+                    if exists_c:
+                        c.execute("""UPDATE student_contracts SET 
+                                     date_signed=?, end_date=?, total_amount=?, paid_amount=?, payment_status=?, notes=? 
+                                     WHERE id=?""", 
+                                     (str(d_sign), str(d_end), amount_total, amount_paid, status_c, notes_c, exists_c[0]))
+                        st.success("Дані контракту оновлено!")
+                    else:
+                        c.execute("""INSERT INTO student_contracts 
+                                     (student_name, contract_number, date_signed, end_date, total_amount, paid_amount, payment_status, notes) 
+                                     VALUES (?,?,?,?,?,?,?,?)""",
+                                     (s_contract, c_num, str(d_sign), str(d_end), amount_total, amount_paid, status_c, notes_c))
+                        st.success("Новий контракт зареєстровано!")
+                    conn.commit()
+                    st.rerun()
+
+        # --- ТАБЛИЦЯ ---
+        with col_con2:
+            st.subheader("📂 Реєстр договорів")
+            
+            # Статистика
+            total_debt_query = "SELECT SUM(total_amount - paid_amount) FROM student_contracts WHERE total_amount > paid_amount"
+            debt_sum = c.execute(total_debt_query).fetchone()[0]
+            debt_sum = debt_sum if debt_sum else 0
+            
+            st.metric("Загальна заборгованість по факультету", f"{debt_sum:,.2f} грн")
+            
+            df_contracts = pd.read_sql("SELECT * FROM student_contracts", conn)
+            
+            if not df_contracts.empty:
+                # Підсвітка боржників
+                def highlight_debt_contract(val):
+                    if isinstance(val, str) and "Борг" in val:
+                        return 'color: #ff4b4b; font-weight: bold'
+                    elif isinstance(val, str) and "Не оплачено" in val:
+                        return 'color: #ff4b4b'
+                    return 'color: #00cc66'
+
+                st.dataframe(df_contracts.style.map(highlight_debt_contract, subset=['payment_status']), use_container_width=True)
+                
+                st.download_button("⬇️ Завантажити реєстр (CSV)", convert_df_to_csv(df_contracts), "contracts_registry.csv", "text/csv")
+            else:
+                st.info("Контрактів ще не додано.")
 
 def system_settings_view():
     st.title("⚙️ Системні налаштування")
