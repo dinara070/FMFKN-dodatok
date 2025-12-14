@@ -684,15 +684,15 @@ def main():
             
         st.sidebar.divider()
         menu_options = {
-            "🏠 Головна панель": main_panel,
-            "👥 Студенти та Групи": students_groups_view,
-            "👨‍🏫 Викладачі та Кафедри": teachers_view,
-            "📅 Розклад занять": schedule_view,
-            "💯 Електронний журнал": gradebook_view,
-            "📝 Журнал відвідуваності": attendance_view,
-            "📊 Звіти та Пошук": reports_view,
-            "📂 Документообіг": documents_view,
-            "🗄️ Файловий репозиторій": file_repository_view
+            "Головна панель": main_panel,
+            "Студенти та Групи": students_groups_view,
+            "Викладачі та Кафедри": teachers_view,
+            "Розклад занять": schedule_view,
+            "Електронний журнал": gradebook_view,
+            "Журнал відвідуваності": attendance_view,
+            "Звіти та Пошук": reports_view,
+            "Документообіг": documents_view,
+            "Файловий репозиторій": file_repository_view
         }
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
         menu_options[selection]()
