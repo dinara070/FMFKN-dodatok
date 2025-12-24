@@ -508,15 +508,6 @@ def teachers_view():
                         st.session_state.teachers_data[dept].pop(i)
                         st.rerun()
 
-    # --- 3. ФУНКЦІЯ СОРТУВАННЯ (Sidebar) ---
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("⚙️ Адмін-панель")
-    if st.sidebar.toggle("Увімкнути режим сортування"):
-        st.info("Drag-and-drop: Наразі ви можете змінювати пріоритет викладачів, видаляючи та додаючи їх у потрібному порядку.")
-
-# Запуск функції
-teachers_view()
-
 def schedule_view():
     st.title("📅 Розклад")
     conn = create_connection()
