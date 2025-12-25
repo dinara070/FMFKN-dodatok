@@ -783,10 +783,16 @@ def attendance_view():
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
     
+    # --- ЛОГІКА ДЛЯ СТУДЕНТА ---
     if st.session_state['role'] == 'student':
-        # (Код для студента залишається без змін)
-        df_att = pd.read_sql(f"SELECT subject, date_column as 'Дата', status FROM attendance WHERE student_name='{st.session_state['full_name']}'", conn)
+        df_att = pd.read_sql(
+            f"SELECT subject as 'Предмет', date_column as 'Дата', status as 'Статус' "
+            f"FROM attendance WHERE student_name='{st.session_state['full_name']}'", 
+            conn
+        )
         st.dataframe(df_att, use_container_width=True)
+        
+    # --- ЛОГІКА ДЛЯ АДМІНІСТРАТОРА / ВИКЛАДАЧА ---
     else:
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="att_grp")
@@ -798,13 +804,27 @@ def attendance_view():
         with col_add:
             with st.expander("➕ Додати дату вручну"):
                 with st.form("new_att_col"):
-                    col_name = st.text_input("Назва дати")
+                    col_name = st.text_input("Назва дати (напр. 25.12)")
+                    
+                    # Вибір початкового статусу для всіх студентів
+                    default_status = st.selectbox(
+                        "Статус для всіх за замовчуванням:",
+                        ["", "присутній", "н", "н/п", "з"]
+                    )
+                    
                     if st.form_submit_button("Створити"):
-                        stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
-                        for s in stds:
-                            conn.execute("INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)", (s, grp, subj, col_name, "")) 
-                        conn.commit()
-                        st.rerun()
+                        if col_name:
+                            stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
+                            for s in stds:
+                                conn.execute(
+                                    "INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)", 
+                                    (s, grp, subj, col_name, default_status)
+                                ) 
+                            conn.commit()
+                            st.success(f"Колонку '{col_name}' створено!")
+                            st.rerun()
+                        else:
+                            st.error("Введіть назву дати!")
 
         with col_imp:
             with st.expander("📥 Імпорт з Excel"):
@@ -815,49 +835,60 @@ def attendance_view():
                         for s_name, row in imp_df.iterrows():
                             for d_col, val in row.items():
                                 val = str(val) if pd.notna(val) else ""
-                                # Перевіряємо чи є запис, якщо ні - створюємо, якщо є - оновлюємо
-                                res = conn.execute("SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", (s_name, subj, d_col)).fetchone()
+                                res = conn.execute(
+                                    "SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
+                                    (s_name, subj, d_col)
+                                ).fetchone()
                                 if res:
                                     conn.execute("UPDATE attendance SET status=? WHERE id=?", (val, res[0]))
                                 else:
-                                    conn.execute("INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)", (s_name, grp, subj, d_col, val))
+                                    conn.execute(
+                                        "INSERT INTO attendance (student_name, group_name, subject, date_column, status) VALUES (?,?,?,?,?)", 
+                                        (s_name, grp, subj, d_col, val)
+                                    )
                         conn.commit()
                         st.success("Дані імпортовано!")
                         st.rerun()
 
-        # Отримання даних
+        # --- ОТРИМАННЯ ТА ВІДОБРАЖЕННЯ ДАНИХ ---
         raw = pd.read_sql(f"SELECT student_name, date_column, status FROM attendance WHERE group_name='{grp}' AND subject='{subj}'", conn)
         
         if not raw.empty:
+            # Створюємо матрицю
             matrix = raw.pivot_table(index='student_name', columns='date_column', values='status', aggfunc='first').fillna("")
             
-            # --- ФІЛЬТРАЦІЯ ТА ЕКСПОРТ ---
             st.divider()
             f_col1, f_col2 = st.columns([2,1])
+            
             with f_col1:
+                # Рахуємо пропуски "н" для фільтрації
                 missed_counts = (matrix == "н").sum(axis=1)
-                n_filter = st.slider("Студенти з пропусками >= N:", 0, int(missed_counts.max() if not missed_counts.empty else 0), 0)
+                max_misses = int(missed_counts.max()) if not missed_counts.empty else 0
+                n_filter = st.slider("Студенти з пропусками (н) >= N:", 0, max_misses, 0)
             
             with f_col2:
+                # Експорт
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     matrix.to_excel(writer, sheet_name='Відвідуваність')
-                st.download_button("📥 Експорт в Excel", buffer.getvalue(), f"Journal_{grp}_{subj}.xlsx", use_container_width=True)
+                st.write("Звітність")
+                st.download_button("📥 Експорт Excel", buffer.getvalue(), f"Journal_{grp}_{subj}.xlsx", use_container_width=True)
 
+            # Застосовуємо фільтр
             filtered_matrix = matrix[missed_counts >= n_filter]
 
-            # --- НАЛАШТУВАННЯ ТАБЛИЦІ (Data Editor) ---
-            st.info("💡 Порада: Використовуйте 'н', 'н/п' (поважна), 'з' (запізнення) або виберіть зі списку.")
-            
-            # Створюємо конфігурацію стовпців для випадаючого списку
+            # Конфігурація таблиці (Dropdown меню для кожного стовпця з датою)
             column_config = {
                 col: st.column_config.SelectboxColumn(
                     col,
-                    options=["", "н", "н/п", "з", "присутній"],
+                    options=["", "присутній", "н", "н/п", "з"],
                     width="small"
                 ) for col in filtered_matrix.columns
             }
 
+            st.write(f"### Редагування: {grp} — {subj}")
+            st.info("💡 Виберіть статус із випадаючого списку в таблиці.")
+            
             edited = st.data_editor(
                 filtered_matrix, 
                 column_config=column_config,
@@ -867,14 +898,17 @@ def attendance_view():
             if st.button("💾 Зберегти зміни"):
                 for s_name, row in edited.iterrows():
                     for d_col, val in row.items():
-                        res = conn.execute("SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", (s_name, subj, d_col)).fetchone()
+                        res = conn.execute(
+                            "SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
+                            (s_name, subj, d_col)
+                        ).fetchone()
                         if res: 
                             conn.execute("UPDATE attendance SET status=? WHERE id=?", (val, res[0]))
                 conn.commit()
                 st.success("Дані збережено!")
                 st.rerun()
         else:
-            st.info("Журнал порожній.")
+            st.info("Журнал порожній. Додайте дату або імпортуйте Excel файл.")
 
 def reports_view():
     st.title("📊 Звіти та Пошук")
