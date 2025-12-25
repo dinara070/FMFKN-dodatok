@@ -526,37 +526,44 @@ import pandas as pd
 import streamlit as st
 
 def schedule_view():
-    st.title("📅 Розклад")
+    st.title("📅 Розклад занять")
     conn = create_connection()
     
     # Вибір групи
-    grp = st.selectbox("Група", list(GROUPS_DATA.keys()))
+    grp = st.selectbox("Оберіть групу", list(GROUPS_DATA.keys()), key="sch_grp_select")
     
-    # --- БЛОК ЕКСПОРТУ ТА ІМПОРТУ (Для адміністрації) ---
+    # --- БЛОК ІМПОРТУ ТА ЕКСПОРТУ (Тільки для рівня Деканату/Адміна) ---
     if st.session_state['role'] in DEAN_LEVEL:
+        st.divider()
         col_exp, col_imp = st.columns(2)
         
         with col_exp:
-            st.subheader("📤 Експорт")
-            df_full = pd.read_sql_query(f"SELECT day, time, subject, teacher FROM schedule WHERE group_name='{grp}'", conn)
-            if not df_full.empty:
-                # Експорт в Excel
+            st.subheader("📤 Експорт розкладу")
+            # Отримуємо чисті дані з бази для експорту
+            df_to_export = pd.read_sql_query(
+                f"SELECT day, time, subject, teacher FROM schedule WHERE group_name='{grp}'", 
+                conn
+            )
+            
+            if not df_to_export.empty:
+                # 1. Експорт в Excel (xlsxwriter)
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df_full.to_excel(writer, index=False, sheet_name='Розклад')
+                    df_to_export.to_excel(writer, index=False, sheet_name='Розклад')
                 
                 st.download_button(
-                    label="📥 Завантажити в Excel",
+                    label="📥 Завантажити в Excel (.xlsx)",
                     data=buffer.getvalue(),
                     file_name=f"schedule_{grp}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
                 
-                # Залишаємо CSV як альтернативу
+                # 2. Експорт в CSV
+                csv_data = df_to_export.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="📄 Завантажити в CSV",
-                    data=df_full.to_csv(index=False).encode('utf-8-sig'),
+                    label="📄 Завантажити в CSV (.csv)",
+                    data=csv_data,
                     file_name=f"schedule_{grp}.csv",
                     mime="text/csv",
                     use_container_width=True
@@ -565,62 +572,77 @@ def schedule_view():
                 st.info("Немає даних для експорту")
 
         with col_imp:
-            st.subheader("📥 Імпорт")
-            uploaded_file = st.file_uploader("Завантажте файл (xlsx або csv)", type=['xlsx', 'csv'])
+            st.subheader("📥 Імпорт розкладу")
+            uploaded_file = st.file_uploader("Завантажте файл (.xlsx або .csv)", type=['xlsx', 'csv'])
+            
             if uploaded_file:
                 try:
+                    # Визначаємо формат та зчитуємо
                     if uploaded_file.name.endswith('.csv'):
                         imp_df = pd.read_csv(uploaded_file)
                     else:
                         imp_df = pd.read_excel(uploaded_file)
                     
-                    if st.button("🚀 Підтвердити імпорт для " + grp):
-                        # Очищуємо старий розклад групи перед імпортом (за бажанням)
-                        # conn.execute(f"DELETE FROM schedule WHERE group_name='{grp}'")
-                        
-                        for _, row in imp_df.iterrows():
-                            conn.execute(
-                                "INSERT INTO schedule (group_name, day, time, subject, teacher) VALUES (?,?,?,?,?)",
-                                (grp, row['day'], row['time'], row['subject'], row['teacher'])
-                            )
-                        conn.commit()
-                        st.success("Розклад успішно оновлено!")
-                        st.rerun()
+                    # Перевірка наявності необхідних колонок
+                    required_cols = {'day', 'time', 'subject', 'teacher'}
+                    if required_cols.issubset(imp_df.columns):
+                        if st.button("🚀 Підтвердити імпорт для " + grp):
+                            for _, row in imp_df.iterrows():
+                                conn.execute(
+                                    "INSERT INTO schedule (group_name, day, time, subject, teacher) VALUES (?,?,?,?,?)",
+                                    (grp, row['day'], row['time'], row['subject'], row['teacher'])
+                                )
+                            conn.commit()
+                            st.success(f"Дані успішно додані до розкладу групи {grp}!")
+                            st.rerun()
+                    else:
+                        st.error(f"Помилка! Файл повинен містити колонки: {required_cols}")
                 except Exception as e:
-                    st.error(f"Помилка формату файлу: переконайтеся, що колонки називаються 'day', 'time', 'subject', 'teacher'")
+                    st.error(f"Помилка при читанні файлу: {e}")
 
     st.divider()
 
     # --- ВІДОБРАЖЕННЯ РОЗКЛАДУ ---
-    df_view = pd.read_sql_query(f"SELECT day as 'День', time as 'Час', subject as 'Предмет', teacher as 'Викладач' FROM schedule WHERE group_name='{grp}'", conn)
+    # Отримуємо дані з гарними назвами для таблиці
+    df_view = pd.read_sql_query(
+        f"SELECT day as 'День', time as 'Час', subject as 'Предмет', teacher as 'Викладач' FROM schedule WHERE group_name='{grp}'", 
+        conn
+    )
     
     if not df_view.empty:
-        # Сортування за днями тижня для зручності
+        # Логічне сортування по днях тижня
         days_order = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота"]
         df_view['День'] = pd.Categorical(df_view['День'], categories=days_order, ordered=True)
         df_view = df_view.sort_values(['День', 'Час'])
         
+        st.subheader(f"📅 Поточний розклад групи {grp}")
         st.table(df_view)
     else:
-        st.info("Наразі дані не завантажені.")
+        st.info("Наразі розклад для цієї групи порожній.")
     
-    # --- ФОРМА РУЧНОГО ДОДАВАННЯ (Тільки для DEAN_LEVEL) ---
+    # --- ФОРМА РУЧНОГО ДОДАВАННЯ (Тільки для Адміна/Деканату) ---
     if st.session_state['role'] in DEAN_LEVEL:
-        with st.expander("➕ Додати заняття вручну"):
-            with st.form("sch"):
-                d = st.selectbox("День", ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота"])
-                t = st.selectbox("Час", ["08:30 - 09:50", "10:05 - 11:25", "11:40 - 13:00", "13:30 - 14:50", "15:00 - 16:20", "16:35 - 17:55"])
-                s = st.text_input("Предмет")
-                tch = st.text_input("Викладач", value=st.session_state['full_name'])
+        with st.expander("➕ Додати нове заняття вручну"):
+            with st.form("schedule_manual_form"):
+                d = st.selectbox("День тижня", ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота"])
+                t = st.selectbox("Час (пара)", [
+                    "08:30 - 09:50", "10:05 - 11:25", "11:40 - 13:00", 
+                    "13:30 - 14:50", "15:00 - 16:20", "16:35 - 17:55"
+                ])
+                s = st.text_input("Назва предмета")
+                tch = st.text_input("ПІБ Викладача", value=st.session_state['full_name'])
                 
-                if st.form_submit_button("Додати до розкладу"):
-                    if s:
-                        conn.execute("INSERT INTO schedule (group_name, day, time, subject, teacher) VALUES (?,?,?,?,?)", (grp, d, t, s, tch))
+                if st.form_submit_button("Додати запис"):
+                    if s and tch:
+                        conn.execute(
+                            "INSERT INTO schedule (group_name, day, time, subject, teacher) VALUES (?,?,?,?,?)", 
+                            (grp, d, t, s, tch)
+                        )
                         conn.commit()
-                        st.success("Додано!")
+                        st.success("Заняття додано!")
                         st.rerun()
                     else:
-                        st.warning("Введіть назву предмета")
+                        st.warning("Будь ласка, заповніть усі поля.")
 
 def documents_view():
     st.title("📂 Документообіг та Заяви")
