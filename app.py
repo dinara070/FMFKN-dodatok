@@ -596,6 +596,11 @@ def schedule_view():
                 else:
                     st.error("Введіть назву предмета!")
 
+import pandas as pd
+import io
+import streamlit as st
+from datetime import datetime
+
 def documents_view():
     st.title("📂 Документообіг та Заяви")
     conn = create_connection()
@@ -603,6 +608,7 @@ def documents_view():
     tabs_list = ["📂 Реєстр / Мої заяви", "➕ Створити заяву", "📄 Шаблони заяв"]
     if st.session_state['role'] in DEAN_LEVEL:
         tabs_list.append("⚙️ Обробка запитів")
+        tabs_list.append("📥/📤 Експорт та Імпорт") # Нова вкладка для адміна
     
     tabs = st.tabs(tabs_list)
 
@@ -614,28 +620,16 @@ def documents_view():
             query = f"SELECT id, title as 'Тип документу', status as 'Статус', date as 'Дата подачі' FROM documents WHERE student_name='{st.session_state['full_name']}' ORDER BY id DESC"
         else:
             c1, c2 = st.columns([1, 3])
-            with c1:
-                filter_status = st.selectbox("Фільтр за статусом", ["Всі", "Очікує", "Готово", "Відхилено"])
-            
+            filter_status = c1.selectbox("Фільтр за статусом", ["Всі", "Очікує", "Готово", "Відхилено"])
             base_q = "SELECT id, student_name as 'Студент', title as 'Тип документу', status as 'Статус', date as 'Дата' FROM documents"
-            
-            if filter_status != "Всі":
-                # Фільтруємо по частині слова, щоб знайти "Готово (каб 102)"
-                query = f"{base_q} WHERE status LIKE '{filter_status}%' ORDER BY id DESC"
-            else:
-                query = f"{base_q} ORDER BY id DESC"
+            query = f"{base_q} WHERE status LIKE '{filter_status}%' ORDER BY id DESC" if filter_status != "Всі" else f"{base_q} ORDER BY id DESC"
         
         df_docs = pd.read_sql(query, conn)
         
-        def color_status(val):
-            color = ''
-            if 'Очікує' in str(val): color = '#f0ad4e' # Orange
-            elif 'Готово' in str(val): color = '#5cb85c' # Green
-            elif 'Відхилено' in str(val): color = '#d9534f' # Red
-            return f'color: {color}; font-weight: bold'
-            
         if not df_docs.empty:
-            st.dataframe(df_docs.style.map(color_status, subset=['Статус']), use_container_width=True)
+            st.dataframe(df_docs, use_container_width=True)
+            # Швидкий експорт поточної таблиці для користувача
+            st.download_button("⬇️ Експорт таблиці (CSV)", df_docs.to_csv(index=False).encode('utf-8-sig'), "my_documents.csv", "text/csv")
         else:
             st.info("Список документів порожній")
 
@@ -644,89 +638,93 @@ def documents_view():
         st.subheader("Подання нового запиту")
         with st.form("doc_create"):
             d_type = st.selectbox("Тип документу", [
-                "Довідка про навчання (для ТЦК/Військкомату)",
-                "Довідка про навчання (за місцем вимоги)",
-                "Довідка про доходи (для субсидії/декларації)",
-                "Виписка з оцінками (Transcript)",
-                "Заява на матеріальну допомогу",
-                "Заява на поселення в гуртожиток",
-                "Заява на індивідуальний графік"
+                "Довідка про навчання (для ТЦК/Військкомату)", "Довідка про навчання (за місцем вимоги)",
+                "Довідка про доходи", "Виписка з оцінками (Transcript)",
+                "Заява на матеріальну допомогу", "Заява на поселення", "Заява на індивідуальний графік"
             ])
-            d_comment = st.text_input("Додаткові примітки (напр. 'В ТЦК м. Вінниця' або 'Терміново')")
+            d_comment = st.text_input("Додаткові примітки")
+            
+            # Додана можливість завантажити скан заяви, якщо студент заповнив її вручну
+            uploaded_scan = st.file_uploader("Завантажити скан-копію заяви (необов'язково)", type=['pdf', 'jpg', 'png'])
             
             if st.form_submit_button("Надіслати запит"):
-                # Формуємо повну назву із коментарем
-                full_title = f"{d_type}"
-                if d_comment:
-                    full_title += f" ({d_comment})"
-                
+                full_title = f"{d_type}" + (f" ({d_comment})" if d_comment else "")
                 conn.execute("INSERT INTO documents (title, student_name, status, date) VALUES (?,?,?,?)", 
                              (full_title, st.session_state['full_name'], "Очікує", str(datetime.now().date())))
                 conn.commit()
-                st.success("Запит успішно надіслано до деканату! Відстежуйте статус у першій вкладці.")
+                st.success("Запит надіслано! Деканат розгляне його найближчим часом.")
                 st.rerun()
 
     # --- Вкладка 3: Шаблони ---
     with tabs[2]:
         st.subheader("Бланки та зразки заяв")
-        st.caption("Завантажте, роздрукуйте та підпишіть, якщо потрібна паперова копія.")
-        
         c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown("📄 **Заява на вступ**")
-                st.caption("Для абітурієнтів")
-                st.download_button("⬇️ Завантажити DOCX", b"template_data", "zayava_vstup.docx", key="dl1")
-        with c2:
-            with st.container(border=True):
-                st.markdown("📄 **Заява на гуртожиток**")
-                st.caption("Ордер на поселення")
-                st.download_button("⬇️ Завантажити PDF", b"template_data", "gurtozhitok.pdf", key="dl2")
-        with c3:
-            with st.container(border=True):
-                st.markdown("📄 **Обхідний лист**")
-                st.caption("Для випускників")
-                st.download_button("⬇️ Завантажити PDF", b"template_data", "obhidniy.pdf", key="dl3")
+        # Використовуємо реальні назви для скачування
+        templates = [("Заява на вступ", "zayava_vstup.docx"), ("Заява на гуртожиток", "gurtozhitok.pdf"), ("Обхідний лист", "obhidniy.pdf")]
+        for i, (name, file) in enumerate(templates):
+            with [c1, c2, c3][i].container(border=True):
+                st.markdown(f"📄 **{name}**")
+                st.download_button(f"⬇️ Завантажити", b"FILE_CONTENT_PLACEHOLDER", file, key=f"dl_{i}")
 
-    # --- Вкладка 4: Обробка ---
+    # --- Вкладка 4: Обробка запитів (Admin) ---
     if st.session_state['role'] in DEAN_LEVEL:
         with tabs[3]:
             st.subheader("⚙️ Обробка запитів студентів")
-            
             pending_docs = pd.read_sql("SELECT id, student_name, title, date FROM documents WHERE status='Очікує'", conn)
             
             if not pending_docs.empty:
-                st.warning(f"Увага! Необроблених запитів: {len(pending_docs)}")
-                
-                col_sel, col_act = st.columns([1, 2])
-                
-                with col_sel:
-                    req_id = st.selectbox("Оберіть запит", pending_docs['id'].tolist(), format_func=lambda x: f"ID {x}")
-                
+                req_id = st.selectbox("Оберіть ID запиту для обробки", pending_docs['id'].tolist())
                 sel_row = pending_docs[pending_docs['id']==req_id].iloc[0]
                 
-                with col_act:
-                    with st.container(border=True):
-                        st.markdown(f"**Студент:** {sel_row['student_name']}")
-                        st.markdown(f"**Запит:** {sel_row['title']}")
-                        st.markdown(f"**Дата:** {sel_row['date']}")
-                        st.divider()
-                        
-                        ac1, ac2 = st.columns(2)
-                        new_status = ac1.selectbox("Рішення", ["Готово", "Відхилено", "В роботі"])
-                        admin_comment = ac2.text_input("Коментар для студента", placeholder="Напр. 'Заберіть у 205 каб.'")
-                        
-                        if st.button("✅ Застосувати рішення"):
-                            final_status = new_status
-                            if admin_comment:
-                                final_status += f" ({admin_comment})"
-                            
-                            conn.execute("UPDATE documents SET status=? WHERE id=?", (final_status, req_id))
-                            conn.commit()
-                            st.success(f"Статус запиту #{req_id} змінено на '{final_status}'")
-                            st.rerun()
+                with st.container(border=True):
+                    st.write(f"**Студент:** {sel_row['student_name']} | **Запит:** {sel_row['title']}")
+                    ac1, ac2 = st.columns(2)
+                    res = ac1.selectbox("Рішення", ["Готово", "Відхилено", "В роботі"])
+                    comm = ac2.text_input("Коментар (напр. номер кабінету)")
+                    
+                    if st.button("✅ Підтвердити"):
+                        final_status = f"{res} ({comm})" if comm else res
+                        conn.execute("UPDATE documents SET status=? WHERE id=?", (final_status, req_id))
+                        conn.commit()
+                        st.rerun()
             else:
-                st.success("🎉 Чудова робота! Всі нові запити опрацьовано.")
+                st.success("🎉 Всі запити опрацьовано!")
+
+        # --- НОВА Вкладка 5: Експорт та Імпорт (Admin) ---
+        with tabs[4]:
+            st.subheader("📥/📤 Маніпуляції з базою документів")
+            
+            # Експорт всього реєстру
+            all_docs = pd.read_sql("SELECT * FROM documents", conn)
+            st.markdown("### Експорт даних")
+            col_ex1, col_ex2, col_ex3 = st.columns(3)
+            
+            col_ex1.download_button("📄 Експорт CSV", all_docs.to_csv(index=False).encode('utf-8-sig'), "registry.csv", "text/csv")
+            
+            try:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    all_docs.to_excel(writer, index=False, sheet_name='Реєстр')
+                col_ex2.download_button("📊 Експорт Excel", buffer.getvalue(), "registry.xlsx")
+            except:
+                col_ex2.warning("Excel не доступний")
+            
+            col_ex3.download_button("📜 Експорт JSON", all_docs.to_json(orient='records', force_ascii=False), "registry.json")
+
+            st.divider()
+            
+            # Імпорт даних
+            st.markdown("### Імпорт даних")
+            imp_file = st.file_uploader("Завантажте файл для імпорту в реєстр (CSV/XLSX)", type=['csv', 'xlsx'])
+            if imp_file:
+                if st.button("🚀 Виконати імпорт"):
+                    try:
+                        df_imp = pd.read_csv(imp_file) if imp_file.name.endswith('.csv') else pd.read_excel(imp_file)
+                        df_imp.to_sql('documents', conn, if_exists='append', index=False)
+                        st.success("Дані успішно додано до реєстру!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Помилка: {e}")
 
 def file_repository_view():
     st.title("🗄️ Файловий Репозиторій")
