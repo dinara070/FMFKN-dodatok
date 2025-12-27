@@ -6,6 +6,7 @@ from datetime import datetime
 import io
 import altair as alt
 import re  # Для логіки переведення курсів
+from fpdf import FPDF
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
