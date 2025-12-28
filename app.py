@@ -58,9 +58,9 @@ else:
 
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-ROLES_LIST = ["student", "starosta", "teacher", "methodist", "dean", "admin"]
-TEACHER_LEVEL = ['teacher', 'methodist', 'dean', 'admin']
-DEAN_LEVEL = ['methodist', 'dean', 'admin']
+ROLES_LIST = ["dean", "admin", "tech_admin"]
+TEACHER_LEVEL = ['dean', 'admin', 'tech_admin']
+DEAN_LEVEL = ['dean', 'admin', 'tech_admin']
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
@@ -729,10 +729,12 @@ def gradebook_view():
     conn = create_connection()
     c = conn.cursor()
 
-    # СТУДЕНТ ТА СТАРОСТА ТІЛЬКИ ЧИТАЮТЬ
+    # СТУДЕНТ ТА СТАРОСТА ТІЛЬКИ ЧИТАЮТЬ СВОЇ ОЦІНКИ
     if st.session_state['role'] in ['student', 'starosta']:
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
+    
+    # ВИКЛАДАЧІ, АДМІНІСТРАТОРИ ТА ТЕХ_АДМІНІСТРАТОРИ
     else:
         t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
         
@@ -748,6 +750,8 @@ def gradebook_view():
         subj = c3.selectbox("Предмет", SUBJECTS_LIST)
 
         with t_journal:
+            # Блок додавання колонки доступний всім крім тех_адміна (опціонально)
+            # Якщо тех_адміну теж не можна додавати колонки, можна обгорнути в if
             with st.expander("➕ Додати колонку"):
                 with st.form("new_col"):
                     nm = st.text_input("Назва")
@@ -759,60 +763,63 @@ def gradebook_view():
                                          (s, grp, subj, nm, 0, str(dt)))
                             conn.commit()
                             st.rerun()
-                        else: st.warning("Перевірте назву або наявність студентів у групі.")
+                        else:
+                            st.warning("Перевірте назву або наявність студентів у групі.")
 
-            # Фільтрація запитів
+            # Отримання даних для відображення
             query = f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'"
             if selected_student != "Всі студенти":
                 query += f" AND student_name='{selected_student}'"
             
             raw = pd.read_sql(query, conn)
 
+            # --- ЛОГІКА ВІДОБРАЖЕННЯ ТА РЕДАГУВАННЯ ---
             if not raw.empty:
                 matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
-                edited = st.data_editor(matrix, use_container_width=True)
                 
-                if st.button("Зберегти зміни"):
-                    for s_name, row in edited.iterrows():
-                        for w_name, val in row.items():
-                            c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
-                                      (val, s_name, subj, w_name))
-                    conn.commit()
-                    st.success("Дані оновлено!")
-            else: st.info("Даних немає. Додайте колонку.")
+                # ПЕРЕВІРКА РОЛІ: Технічний адміністратор
+                if st.session_state['role'] == 'tech_admin':
+                    st.info("ℹ️ Режим перегляду для Технічного адміністратора. Збереження недоступне.")
+                    st.dataframe(matrix, use_container_width=True) # Просто перегляд
+                
+                # ПЕРЕВІРКА РОЛІ: Викладач або Адмін
+                else:
+                    edited = st.data_editor(matrix, use_container_width=True)
+                    if st.button("Зберегти зміни"):
+                        for s_name, row in edited.iterrows():
+                            for w_name, val in row.items():
+                                c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
+                                         (val, s_name, subj, w_name))
+                        conn.commit()
+                        st.success("Дані оновлено!")
+            else: 
+                st.info("Даних немає. Додайте колонку.")
 
+        # --- ВКЛАДКА ОПЕРАЦІЙ (Експорт/Імпорт) ---
         with t_ops:
             st.subheader("📤 Експорт")
             raw_export = pd.read_sql(f"SELECT * FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
             
             col_ex1, col_ex2 = st.columns(2)
-            
-            # Експорт у CSV (Працює завжди)
             csv_data = raw_export.to_csv(index=False).encode('utf-8-sig')
             col_ex1.download_button("📄 Експорт CSV", csv_data, "grades.csv", "text/csv")
             
-            # БЕЗПЕЧНИЙ Експорт у Excel
             try:
                 buffer = io.BytesIO()
-                # Спроба використати Excel двигун
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     raw_export.to_excel(writer, index=False)
                 col_ex2.download_button("📊 Експорт Excel", buffer.getvalue(), "grades.xlsx")
             except Exception:
-                # Якщо бібліотеки немає, показуємо кнопку як неактивну або попередження
                 col_ex2.info("Excel тимчасово недоступний (використовуйте CSV)")
 
+            # Імпорт (зазвичай дозволений тех_адміну для налагодження)
             st.divider()
             st.subheader("📥 Імпорт")
             up_file = st.file_uploader("Оберіть файл (CSV або XLSX)", type=["csv", "xlsx"])
             
             if up_file and st.button("🚀 Виконати імпорт"):
                 try:
-                    if up_file.name.endswith('.csv'):
-                        df_new = pd.read_csv(up_file)
-                    else:
-                        df_new = pd.read_excel(up_file)
-                    
+                    df_new = pd.read_csv(up_file) if up_file.name.endswith('.csv') else pd.read_excel(up_file)
                     df_new.to_sql('grades', conn, if_exists='append', index=False)
                     st.success("Успішно імпортовано!")
                     st.rerun()
@@ -1368,7 +1375,6 @@ def session_module_view():
     # --- ВКЛАДКА 1: СТВОРЕННЯ ВІДОМОСТЕЙ ---
     with tab_session:
         st.header("Підготовка екзаменаційних відомостей")
-        
         c1, c2 = st.columns([1, 2])
         
         with c1:
@@ -1396,7 +1402,6 @@ def session_module_view():
             st.subheader("📂 Журнал відомостей")
             sheets_df = pd.read_sql("SELECT * FROM exam_sheets ORDER BY id DESC", conn)
             st.dataframe(sheets_df, use_container_width=True)
-            
             if not sheets_df.empty:
                 st.download_button("⬇️ Завантажити реєстр відомостей", convert_df_to_csv(sheets_df), "exam_sheets.csv", "text/csv")
 
@@ -1405,7 +1410,6 @@ def session_module_view():
         st.header("Занесення оцінок до бази даних")
         st.info("Оцінки, внесені тут, автоматично потрапляють у загальний журнал успішності та відомість.")
         
-        # Вибір відомості
         sheets = pd.read_sql("SELECT id, sheet_number, group_name, subject, control_type FROM exam_sheets WHERE status='Відкрита'", conn)
         
         if not sheets.empty:
@@ -1422,72 +1426,68 @@ def session_module_view():
             
             st.markdown(f"**Група:** {curr_group} | **Предмет:** {curr_subj} | **Тип:** {curr_type}")
             
-            # Отримання студентів
+            # Підготовка списку студентів та існуючих оцінок
             students_list = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{curr_group}'", conn)['full_name'].tolist()
-            
-            # Отримання існуючих оцінок з таблиці GRADES
             existing_grades = pd.read_sql(f"""SELECT student_name, grade FROM grades 
                                               WHERE group_name='{curr_group}' AND subject='{curr_subj}' AND type_of_work='{curr_type}'""", conn)
             
-            # Формування DF для редагування
             data = []
             for student in students_list:
-                grade = 0
                 found = existing_grades[existing_grades['student_name'] == student]
-                if not found.empty:
-                    grade = found.iloc[0]['grade']
+                grade = found.iloc[0]['grade'] if not found.empty else 0
                 data.append({"Студент": student, "Оцінка": grade})
             
             df_grading = pd.DataFrame(data)
-            
             st.write("Проставте оцінки у таблиці нижче:")
-            edited_grades = st.data_editor(df_grading, use_container_width=True)
-            
-            if st.button("💾 Зберегти оцінки в БД"):
-                date_now = str(datetime.now().date())
-                count_updated = 0
+
+            # --- ПЕРЕВІРКА РОЛІ ТЕХНІЧНОГО АДМІНІСТРАТОРА ---
+            if st.session_state['role'] == 'tech_admin':
+                st.warning("⚠️ У вас є права на перегляд відомостей, але редагування заблоковано.")
+                st.dataframe(df_grading, use_container_width=True)
+            else:
+                edited_grades = st.data_editor(df_grading, use_container_width=True, key="editor_exam")
                 
-                for index, row in edited_grades.iterrows():
-                    s_name = row['Студент']
-                    s_grade = row['Оцінка']
+                if st.button("💾 Зберегти оцінки в БД", key="save_exam_grades"):
+                    date_now = str(datetime.now().date())
+                    count_updated = 0
                     
-                    check = c.execute(f"""SELECT id FROM grades 
-                                          WHERE student_name=? AND subject=? AND type_of_work=?""", 
-                                          (s_name, curr_subj, curr_type)).fetchone()
+                    for index, row in edited_grades.iterrows():
+                        s_name = row['Студент']
+                        s_grade = row['Оцінка']
+                        
+                        check = c.execute("""SELECT id FROM grades WHERE student_name=? AND subject=? AND type_of_work=?""", 
+                                         (s_name, curr_subj, curr_type)).fetchone()
+                        
+                        if check:
+                            c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
+                        else:
+                            c.execute("""INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
+                                         VALUES (?,?,?,?,?,?)""", (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
+                        count_updated += 1
                     
-                    if check:
-                        c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
-                    else:
-                        c.execute("""INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
-                                     VALUES (?,?,?,?,?,?)""", (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
-                    count_updated += 1
-                
-                conn.commit()
-                st.success(f"Успішно збережено {count_updated} оцінок!")
-                log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки по відомості для {curr_group}, {curr_subj}")
-        
+                    conn.commit()
+                    st.success(f"Успішно збережено {count_updated} оцінок!")
+                    log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки: {curr_group}, {curr_subj}")
+                    st.rerun()
         else:
             st.warning("Немає відкритих відомостей. Створіть нову у вкладці 'Відомості'.")
 
     # --- ВКЛАДКА 3: РУХ КОНТИНГЕНТУ ---
     with tab_movement:
         st.header("Переведення на наступний навчальний рік")
-        
         col_move1, col_move2 = st.columns(2)
         
         with col_move1:
             st.subheader("🔄 Переведення групи (курс +1)")
-            move_group = st.selectbox("Оберіть групу для переведення", list(GROUPS_DATA.keys()), key="move_grp")
+            move_group = st.selectbox("Оберіть групу", list(GROUPS_DATA.keys()), key="move_grp")
             
-            next_name = move_group
             match = re.match(r"(\d+)(.*)", move_group)
+            next_name = move_group
             is_graduating = False
             
             if match:
-                num = int(match.group(1))
-                rest = match.group(2)
-                if num < 4:
-                    next_name = f"{num+1}{rest}"
+                num, rest = int(match.group(1)), match.group(2)
+                if num < 4: next_name = f"{num+1}{rest}"
                 else:
                     next_name = f"Випуск-{move_group}"
                     is_graduating = True
@@ -1496,43 +1496,38 @@ def session_module_view():
             
             if st.button("Виконати переведення"):
                 if is_graduating:
-                    students_to_grad = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{move_group}'", conn)['full_name'].tolist()
-                    for s in students_to_grad:
+                    students = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{move_group}'", conn)['full_name'].tolist()
+                    for s in students:
                         c.execute("UPDATE student_education_info SET status='Випускник' WHERE student_name=?", (s,))
                         c.execute("UPDATE students SET group_name=? WHERE full_name=?", (new_group_name, s))
-                    st.success(f"Група {move_group} випущена! Статус студентів оновлено.")
                 else:
                     c.execute("UPDATE students SET group_name=? WHERE group_name=?", (new_group_name, move_group))
-                    c.execute(f"UPDATE student_education_info SET course = course + 1 WHERE student_name IN (SELECT full_name FROM students WHERE group_name=?)", (new_group_name,))
-                    st.success(f"Групу {move_group} переведено в {new_group_name}!")
+                    c.execute("UPDATE student_education_info SET course = course + 1 WHERE student_name IN (SELECT full_name FROM students WHERE group_name=?)", (new_group_name,))
                 
                 conn.commit()
-                log_action(st.session_state['full_name'], "Group Move", f"Переведено групу {move_group} -> {new_group_name}")
+                log_action(st.session_state['full_name'], "Group Move", f"{move_group} -> {new_group_name}")
+                st.success("Переведення виконано!")
                 st.rerun()
 
         with col_move2:
             st.subheader("🚫 Відрахування / Академвідпустка")
             action_type = st.selectbox("Дія", ["Відрахування", "Академвідпустка"])
-            
-            all_students_m = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
-            student_to_action = st.selectbox("Студент", all_students_m, key="st_action")
+            all_students = pd.read_sql("SELECT full_name FROM students", conn)['full_name'].tolist()
+            student_to_action = st.selectbox("Студент", all_students, key="st_action")
             reason_move = st.text_input("Причина / № Наказу")
             
             if st.button("Застосувати"):
                 status_map = {"Відрахування": "Відрахований", "Академвідпустка": "У академвідпустці"}
                 new_status = status_map[action_type]
-                
                 c.execute("INSERT OR IGNORE INTO student_education_info (student_name) VALUES (?)", (student_to_action,))
                 c.execute("UPDATE student_education_info SET status=? WHERE student_name=?", (new_status, student_to_action))
                 
                 if action_type == "Відрахування":
                     c.execute("DELETE FROM students WHERE full_name=?", (student_to_action,))
-                    st.warning(f"Студента {student_to_action} відраховано та видалено зі списків.")
-                else:
-                    st.info(f"Статус студента {student_to_action} змінено на '{new_status}'.")
                 
                 conn.commit()
-                log_action(st.session_state['full_name'], "Student Status Change", f"{student_to_action}: {new_status} ({reason_move})")
+                log_action(st.session_state['full_name'], "Status Change", f"{student_to_action}: {new_status}")
+                st.success("Статус змінено!")
                 st.rerun()
 
 def system_settings_view():
@@ -1592,21 +1587,30 @@ def main():
     if not st.session_state['logged_in']:
         login_register_page()
     else:
+        # --- ВІДОБРАЖЕННЯ ПРОФІЛЮ ТА РОЛІ В SIDEBAR ---
         st.sidebar.title(f"👤 {st.session_state['full_name']}")
+        
         role_upper = st.session_state['role'].upper()
+        
+        # Логіка відображення статусів ролей
         if st.session_state['role'] == 'student':
              st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
+        elif st.session_state['role'] == 'tech_admin':
+             st.sidebar.markdown("### ⚙️ ТЕХНІЧНИЙ АДМІНІСТРАТОР")
         elif st.session_state['role'] == 'teacher':
              st.sidebar.markdown("### 👨‍🏫 ВИКЛАДАЧ (ACADEMIC)")
         else:
+             # Для dean, admin, methodist показуємо стандартний підпис
              st.sidebar.caption(f"Роль: {role_upper}")
         
+        # Кнопка зміни теми
         if st.sidebar.button("Перемкнути тему 🌓"):
             toggle_theme()
             st.rerun()
             
         st.sidebar.divider()
         
+        # --- НАЛАШТУВАННЯ МЕНЮ НАВІГАЦІЇ ---
         menu_options = {
             "Головна панель": main_panel,
             "Студенти та Групи": students_groups_view,
@@ -1619,17 +1623,22 @@ def main():
             "Файловий репозиторій": file_repository_view
         }
         
+        # Доступ до спецмодулів (tech_admin входить до DEAN_LEVEL)
         if st.session_state['role'] in DEAN_LEVEL:
             menu_options["Модулі Деканату"] = deanery_modules_view
             menu_options["Сесія та Рух"] = session_module_view 
         
+        # Доступ до системних налаштувань (тільки для admin)
         if st.session_state['role'] == 'admin':
             menu_options["Системні налаштування"] = system_settings_view
 
+        # Відображення вибраної сторінки
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
         menu_options[selection]()
         
         st.sidebar.divider()
+        
+        # Кнопка виходу
         if st.sidebar.button("Вийти 🚪"):
             st.session_state['logged_in'] = False
             st.rerun()
