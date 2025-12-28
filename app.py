@@ -58,9 +58,9 @@ else:
 
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-ROLES_LIST = ["dean", "admin", "tech_admin", "student", "starosta", "teacher", "methodist"]
-TEACHER_LEVEL = ['dean', 'admin', 'tech_admin', 'teacher', 'methodist']
-DEAN_LEVEL = ['dean', 'admin', 'tech_admin', 'methodist']
+ROLES_LIST = ["dean", "admin", "tech_admin"]
+TEACHER_LEVEL = ['dean', 'admin', 'tech_admin']
+DEAN_LEVEL = ['dean', 'admin', 'tech_admin']
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
@@ -272,7 +272,7 @@ def login_register_page():
     c = conn.cursor()
 
     # Оновлений список ролей для реєстрації та перевірки доступу
-    ALLOWED_STAFF = ["admin", "dean", "tech_admin", "methodist", "teacher"]
+    ALLOWED_STAFF = ["admin", "dean", "tech_admin"]
 
     if action == "Вхід":
         username = st.text_input("Логін")
