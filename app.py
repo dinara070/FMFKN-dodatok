@@ -58,9 +58,9 @@ else:
 
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-ROLES_LIST = ["dean", "admin", "tech_admin"]
-TEACHER_LEVEL = ['dean', 'admin', 'tech_admin']
-DEAN_LEVEL = ['dean', 'admin', 'tech_admin']
+ROLES_LIST = ["dean", "admin"]
+TEACHER_LEVEL = ['dean', 'admin']
+DEAN_LEVEL = ['dean', 'admin']
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
@@ -272,7 +272,7 @@ def login_register_page():
     c = conn.cursor()
 
     # Оновлений список ролей для реєстрації та перевірки доступу
-    ALLOWED_STAFF = ["admin", "dean", "tech_admin"]
+    ALLOWED_STAFF = ["admin", "dean"]
 
     if action == "Вхід":
         username = st.text_input("Логін")
@@ -300,7 +300,7 @@ def login_register_page():
                 st.error("Невірний логін або пароль")
 
     elif action == "Реєстрація":
-        st.info("Реєстрація доступна для Адміністрації, Деканату та Технічного персоналу.")
+        st.info("Реєстрація доступна для Адміністрації та Деканату")
         new_user = st.text_input("Вигадайте логін")
         new_pass = st.text_input("Вигадайте пароль", type='password')
         
